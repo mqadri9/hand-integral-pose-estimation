@@ -86,15 +86,16 @@ class Trainer(Base):
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=self.cfg.lr_dec_epoch, gamma=self.cfg.lr_dec_factor)
         return optimizer, scheduler
     
-    def _make_batch_generator(self):
+    def _make_batch_generator(self, main_loop=True):
         self.logger.info("Creating dataset...")
         trainset_list = []
         for i in range(len(self.cfg.trainset)):
             trainset_list.append(eval(self.cfg.trainset[i])("training"))
     
         trainset_loader = DatasetLoader(trainset_list, True, 
-                                        transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=self.cfg.pixel_mean, std=self.cfg.pixel_std)]))
-        print(len(trainset_loader))
+                                        transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=self.cfg.pixel_mean, std=self.cfg.pixel_std)]),
+                                        main_loop=main_loop)
+
         batch_generator = DataLoader(dataset=trainset_loader, 
                                      batch_size=self.cfg.num_gpus*self.cfg.batch_size, 
                                      shuffle=True, 

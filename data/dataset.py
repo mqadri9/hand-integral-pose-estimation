@@ -1,5 +1,4 @@
 import os
-import os.path as osp
 import numpy as np
 import cv2
 import random
@@ -7,17 +6,20 @@ import time
 import torch
 import copy
 from torch.utils.data.dataset import Dataset
+from FreiHand import FreiHand
 import pickle as pk
+import matplotlib.pyplot as plt
 
 from config import cfg
 import sys
-
+import augment
+plt.switch_backend('agg')
 class DatasetLoader(Dataset):
     """Create the dataset_loader
     db: a list of datasets (Listed in the config.py trainset list)
     is_train: a flag indicating of this is training data
     """
-    def __init__(self, db, is_train, transform):
+    def __init__(self, db, is_train, transform, main_loop=True):
         
         if isinstance(db, list):
             self.multiple_db = True
@@ -37,7 +39,7 @@ class DatasetLoader(Dataset):
             #self.lr_skeleton = db.lr_skeleton
             #self.flip_pairs = db.flip_pairs
             self.joints_have_depth = db.joints_have_depth
-        
+        self.main_loop = main_loop
         self.transform = transform
         self.is_train = is_train
 
@@ -67,30 +69,69 @@ class DatasetLoader(Dataset):
         bbox = data['bbox']
         joint_img = data['joint_img']
         joint_vis = data['joint_vis']
-
-        # 1. load image
-        cvimg = cv2.imread(data['img_path'], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+        K = data['K']
         
+        R = augment.sample_rotation_matrix()
+        #print("Rotation matrix is")
+        #print(R)
+        #sys.exit()
+        # 1. load image
+        
+        cvimg = cv2.imread(data['img_path'], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+        if not self.main_loop:
+            return cvimg
+        #print("joint_img")
+        #print(joint_img)
+        #sys.exit()
         if not isinstance(cvimg, np.ndarray):
             raise IOError("Fail to read %s" % data['img_path'])
         img_height, img_width, img_channels = cvimg.shape
         
         # 2. get augmentation params
         if self.do_augment:
-            scale, rot, color_scale = get_aug_config()
+            scale, rot, color_scale = augment.get_aug_config()
+            #scale, rot, color_scale = 1.0, 0, [1.0, 1.0, 1.0]
         else:
             scale, rot, color_scale = 1.0, 0, [1.0, 1.0, 1.0]
-
+        
+        
+        #homo = K.dot(R).dot(np.linalg.inv(K))
+         
+        #img2_w = cv2.warpPerspective(cvimg, homo, (cvimg.shape[1], cvimg.shape[0]))
+        
+        #nn = str(random.randint(1001,2000))
+        #nn2 = str(random.randint(1,100))
+        #print("=================================================")
+        #print(nn)
+        #print(data['img_path'])
+        #print("==================================================")
+        #joint_img2 = np.zeros(joint_img.shape)
+        joint_img2 = np.copy(joint_img)
+        #for i in range(len(joint_img)):
+        #    joint_img2[i, 0:2] = augment.trans_point2d(joint_img[i, 0:2], homo)
+        #fig = plt.figure()
+        #ax1 = fig.add_subplot(121)
+        #ax2 = fig.add_subplot(122)
+        #ax1.imshow(cvimg)
+        #ax2.imshow(img2_w)
+        #print("-------------------------------------------------------")
+        #print(data['img_path'])
+        #FreiHand.plot_hand(ax1, joint_img[:, 0:2], order='uv')
+        #FreiHand.plot_hand(ax2, joint_img2[:, 0:2], order='uv')
+        #ax1.axis('off')
+        #ax2.axis('off')
+        #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), img2_w)
+        #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn2), cvimg)
+        #plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
+        #sys.exit()
         # 3. crop patch from img and perform data augmentation (scale, rot, color scale)
-        img_patch, trans = generate_patch_image(cvimg, bbox, scale, rot)
-        for i in range(img_channels):
-            img_patch[:, :, i] = np.clip(img_patch[:, :, i] * color_scale[i], 0, 255)
-
+        img_patch, trans, joint_img = augment.generate_patch_image2(cvimg, data["joint_cam"], scale, rot, K)
         # 4. generate patch joint ground truth
-
+        # color 
+        # random noise 
 
         for i in range(len(joint_img)):
-            joint_img[i, 0:2] = trans_point2d(joint_img[i, 0:2], trans)
+            joint_img[i, 0:2] = augment.trans_point2d(joint_img[i, 0:2], trans)
             joint_img[i, 2] /= (cfg.bbox_3d_shape[0]/2. * scale) # expect depth lies in -bbox_3d_shape[0]/2 ~ bbox_3d_shape[0]/2 -> -1.0 ~ 1.0
             joint_img[i, 2] = (joint_img[i,2] + 1.0)/2. # 0~1 normalize
             joint_vis[i] *= (
@@ -101,7 +142,29 @@ class DatasetLoader(Dataset):
                             (joint_img[i,2] >= 0) & \
                             (joint_img[i,2] < 1)
                             )
+        #print("---------------------------")
+        #print(cvimg)
+        #print(img_patch)
+        #print("---------------------------")
 
+        
+        #joint_img2 = np.zeros(joint_img.shape)
+        #joint_img2 = np.copy(joint_img)
+        fig = plt.figure()
+        ax1 = fig.add_subplot(121)
+        ax2 = fig.add_subplot(122)
+        
+        ax1.imshow((255*img_patch/np.max(img_patch)).astype(np.uint8))
+        ax2.imshow(cvimg)
+        #ax1.imshow(img2_w)
+        
+        FreiHand.plot_hand(ax1, joint_img[:, 0:2], order='uv')
+        FreiHand.plot_hand(ax2, joint_img2[:, 0:2], order='uv')
+        ax1.axis('off')
+        nn = str(random.randint(2001,3000))
+        plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
+        #print("hehehehehehe")
+        sys.exit()
         vis = False
         if vis:
             filename = str(random.randrange(1,500))
@@ -123,8 +186,12 @@ class DatasetLoader(Dataset):
         
         # change joint coord, vis to reference dataset. 0th db is reference dataset
         if self.multiple_db:
-            joint_img = transform_joint_to_other_db(joint_img, joints_name, ref_joints_name)        
-            joint_vis = transform_joint_to_other_db(joint_vis, joints_name, ref_joints_name) 
+            # TODO Right now transform_joint_to_other_db just returns the inputs
+            # If implementing multiple datasources in the future, this method needs to be implemented
+            joints_name = None
+            ref_joints_name = None
+            joint_img = augment.transform_joint_to_other_db(joint_img, joints_name, ref_joints_name)        
+            joint_vis = augment.transform_joint_to_other_db(joint_vis, joints_name, ref_joints_name) 
         if self.is_train:
             img_patch = self.transform(img_patch)
             joint_img = joint_img.astype(np.float32)
@@ -136,130 +203,11 @@ class DatasetLoader(Dataset):
             img_patch = self.transform(img_patch)
             return img_patch
         
+
+        
     def __len__(self):
         if self.multiple_db:
             return max([len(db) for db in self.db]) * len(self.db)
         else:
             return len(self.db)        
-        
-            
-# helper functions
-def transform_joint_to_other_db(src_joint, src_name, dst_name):
-
-    src_joint_num = len(src_name)
-    dst_joint_num = len(dst_name)
-
-    new_joint = np.zeros(((dst_joint_num,) + src_joint.shape[1:]))
-
-    for src_idx in range(len(src_name)):
-        name = src_name[src_idx]
-        if name in dst_name:
-            dst_idx = dst_name.index(name)
-            new_joint[dst_idx] = src_joint[src_idx]
-
-    return new_joint
-
-def get_aug_config():
     
-    scale_factor = 0.25
-    rot_factor = 30
-    color_factor = 0.2
-    
-    scale = np.clip(np.random.randn(), -1.0, 1.0) * scale_factor + 1.0
-    rot = np.clip(np.random.randn(), -2.0,
-                  2.0) * rot_factor if random.random() <= 0.6 else 0
-    c_up = 1.0 + color_factor
-    c_low = 1.0 - color_factor
-    color_scale = [random.uniform(c_low, c_up), random.uniform(c_low, c_up), random.uniform(c_low, c_up)]
-
-    return scale, rot, color_scale
-
-
-def generate_patch_image(cvimg, bbox, scale, rot):
-    print("======== INSIDE generate_patch_image=================")
-    print(bbox)
-    print(scale)
-    print(rot)
-    img = cvimg.copy()
-    print(img.shape)
-
-    img_height, img_width, img_channels = img.shape
-
-    bb_c_x = float(bbox[0])
-    bb_c_y = float(bbox[1])
-    bb_width = float(bbox[2])
-    bb_height = float(bbox[3])
-    
-    trans = gen_trans_from_patch_cv(bb_c_x, bb_c_y, bb_width, bb_height, cfg.input_shape[1], cfg.input_shape[0], scale, rot, inv=False)
-    img_patch = cv2.warpAffine(img, trans, (int(cfg.input_shape[1]), int(cfg.input_shape[0])), flags=cv2.INTER_LINEAR)
-
-    nn = str(random.random())
-    nn = img_path.split('/')[-1]
-    cv2.imwrite('/home/mqadri/integral-human-pose/pytorch_projects/hm36_challenge/mytests/{}'.format(nn), cvimg)
-    
-    img_patch = img_patch[:,:,::-1].copy()
-    img_patch = img_patch.astype(np.float32)
-
-    return img_patch, trans
-
-def rotate_2d(pt_2d, rot_rad):
-    x = pt_2d[0]
-    y = pt_2d[1]
-    sn, cs = np.sin(rot_rad), np.cos(rot_rad)
-    xx = x * cs - y * sn
-    yy = x * sn + y * cs
-    return np.array([xx, yy], dtype=np.float32)
-
-def gen_trans_from_patch_cv(c_x, c_y, src_width, src_height, dst_width, dst_height, scale, rot, inv=False):
-    """
-    Input is: 
-    c_x: bb center x
-    c_y: bb center y
-    src_width: bb_width
-    src_height: bb_height
-    dst_width: cfg.input_shape[1]
-    dst_height: cfg.input_shape[0]
-    scale/rot
-    inv: 
-        True: find a transformation from destination to source
-    """
-    # augment size with scale
-    src_w = src_width * scale
-    src_h = src_height * scale
-    src_center = np.array([c_x, c_y], dtype=np.float32)
-    # augment rotation
-    rot_rad = np.pi * rot / 180
-    src_downdir = rotate_2d(np.array([0, src_h * 0.5], dtype=np.float32), rot_rad)
-    src_rightdir = rotate_2d(np.array([src_w * 0.5, 0], dtype=np.float32), rot_rad)
-
-    dst_w = dst_width
-    dst_h = dst_height
-    dst_center = np.array([dst_w * 0.5, dst_h * 0.5], dtype=np.float32)
-    dst_downdir = np.array([0, dst_h * 0.5], dtype=np.float32)
-    dst_rightdir = np.array([dst_w * 0.5, 0], dtype=np.float32)
-
-    src = np.zeros((3, 2), dtype=np.float32)
-    src[0, :] = src_center
-    src[1, :] = src_center + src_downdir
-    src[2, :] = src_center + src_rightdir
-
-    dst = np.zeros((3, 2), dtype=np.float32)
-    dst[0, :] = dst_center
-    dst[1, :] = dst_center + dst_downdir
-    dst[2, :] = dst_center + dst_rightdir
-
-    if inv:
-        trans = cv2.getAffineTransform(np.float32(dst), np.float32(src))
-    else:
-        trans = cv2.getAffineTransform(np.float32(src), np.float32(dst))
-
-    return trans
-
-def trans_point2d(pt_2d, trans):
-    src_pt = np.array([pt_2d[0], pt_2d[1], 1.]).T
-    dst_pt = np.dot(trans, src_pt)
-    return dst_pt[0:2]           
-             
-            
-            
-        

@@ -11,15 +11,16 @@ class Config:
     root_dir = os.path.join(cur_dir, '..')
     data_dir = os.path.join(root_dir, 'data')
     output_dir = os.path.join(root_dir, 'output')
+    common_dir = os.path.join(root_dir, 'common')
     model_dir = os.path.join(output_dir, 'model_dump')
     vis_dir = os.path.join(output_dir, 'vis')
     log_dir = os.path.join(output_dir, 'log')
     result_dir = os.path.join(output_dir, 'result')
-
+    
     input_shape = (224, 224) 
     output_shape = (input_shape[0]//4, input_shape[1]//4)
-    depth_dim = 56
-    
+    depth_dim = 54
+    bbox_3d_shape = (2000, 2000, 2000) # depth, height, width
     # training config
     lr_dec_epoch = [15, 17]
     #end_epoch = 20
@@ -59,6 +60,7 @@ cfg = Config()
 sys.path.insert(0, os.path.join(cfg.root_dir, 'common'))
 from utils.dir_utils import add_pypath, make_folder
 add_pypath(os.path.join(cfg.data_dir))
+add_pypath(os.path.join(cfg.common_dir))
 for i in range(len(cfg.trainset)):
     add_pypath(os.path.join(cfg.data_dir, cfg.trainset[i]))
 add_pypath(os.path.join(cfg.data_dir, cfg.testset))
