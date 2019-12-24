@@ -42,7 +42,7 @@ def main():
         trainer.tot_timer.tic()
         trainer.read_timer.tic()
 
-        for itr, (input_img, joint_img, joint_vis, joints_have_depth) in enumerate(trainer.batch_generator):
+        for itr, (img_patch, label, label_weight) in enumerate(trainer.batch_generator):
         #for itr, kk in enumerate(trainer.batch_generator):
             #print(kk)
             #sys.exit()
@@ -60,14 +60,13 @@ def main():
             # 
             # print("===============================================")
             #===================================================================
-            input_img = input_img.cuda()
-            joint_img = joint_img.cuda()
-            joint_vis = joint_vis.cuda()
-            joints_have_depth = joints_have_depth.cuda()
+            img_patch = img_patch.cuda()
+            label = label.cuda()
+            label_weight = label_weight.cuda()
             
-            heatmap_out = trainer.model(input_img)
+            heatmap_out = trainer.model(img_patch)
             #print(len(heatmap_out))
-            JointLocationLoss = trainer.JointLocationLoss(heatmap_out, joint_img, joint_vis, joints_have_depth)
+            JointLocationLoss = trainer.JointLocationLoss(heatmap_out, label, label_weight)
 
             loss = JointLocationLoss
 

@@ -9,10 +9,14 @@ from torch.utils.data.dataset import Dataset
 from FreiHand import FreiHand
 import pickle as pk
 import matplotlib.pyplot as plt
+import scipy.optimize
 
 from config import cfg
 import sys
 import augment
+
+from FreiHand_config import FreiHandConfig
+
 plt.switch_backend('agg')
 class DatasetLoader(Dataset):
     """Create the dataset_loader
@@ -66,142 +70,105 @@ class DatasetLoader(Dataset):
             joints_have_depth = self.joints_have_depth
             data = copy.deepcopy(self.db[index])
         
-        bbox = data['bbox']
-        joint_img = data['joint_img']
-        joint_vis = data['joint_vis']
         K = data['K']
-        
-        R = augment.sample_rotation_matrix()
-        #print("Rotation matrix is")
-        #print(R)
-        #sys.exit()
+        joint_cam = data["joint_cam"]
         # 1. load image
-        
         cvimg = cv2.imread(data['img_path'], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
         if not self.main_loop:
             return cvimg
-        #print("joint_img")
-        #print(joint_img)
-        #sys.exit()
         if not isinstance(cvimg, np.ndarray):
             raise IOError("Fail to read %s" % data['img_path'])
         img_height, img_width, img_channels = cvimg.shape
         
         # 2. get augmentation params
         if self.do_augment:
-            scale, rot, color_scale = augment.get_aug_config()
+            scale, R, color_scale = augment.get_aug_config()
             #scale, rot, color_scale = 1.0, 0, [1.0, 1.0, 1.0]
         else:
-            scale, rot, color_scale = 1.0, 0, [1.0, 1.0, 1.0]
-        
-        
-        #homo = K.dot(R).dot(np.linalg.inv(K))
-         
-        #img2_w = cv2.warpPerspective(cvimg, homo, (cvimg.shape[1], cvimg.shape[0]))
-        
-        #nn = str(random.randint(1001,2000))
-        #nn2 = str(random.randint(1,100))
-        #print("=================================================")
-        #print(nn)
-        #print(data['img_path'])
-        #print("==================================================")
-        #joint_img2 = np.zeros(joint_img.shape)
-        joint_img2 = np.copy(joint_img)
-        #for i in range(len(joint_img)):
-        #    joint_img2[i, 0:2] = augment.trans_point2d(joint_img[i, 0:2], homo)
-        #fig = plt.figure()
-        #ax1 = fig.add_subplot(121)
-        #ax2 = fig.add_subplot(122)
-        #ax1.imshow(cvimg)
-        #ax2.imshow(img2_w)
-        #print("-------------------------------------------------------")
-        #print(data['img_path'])
-        #FreiHand.plot_hand(ax1, joint_img[:, 0:2], order='uv')
-        #FreiHand.plot_hand(ax2, joint_img2[:, 0:2], order='uv')
-        #ax1.axis('off')
-        #ax2.axis('off')
-        #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), img2_w)
-        #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn2), cvimg)
-        #plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
-        #sys.exit()
-        # 3. crop patch from img and perform data augmentation (scale, rot, color scale)
-        img_patch, trans, joint_img = augment.generate_patch_image2(cvimg, data["joint_cam"], scale, rot, K)
+            scale, R, color_scale = 1.0, 0, [1.0, 1.0, 1.0]
+
+        #img_patch = self.transform(cvimg)
+        img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, width = augment.generate_patch_image(cvimg, joint_cam, scale, R, K)
+        #img_patch = self.transform(cvimg)
         # 4. generate patch joint ground truth
         # color 
-        # random noise 
+        # random noise
+        #cons = ({'type': 'ineq', 'fun': lambda x:  x-0.1})
+        #init = 10000 
+        #g = scipy.optimize.minimize(F, init, args=(xyz_rot[:,0:2], joint_img[:,0:2],), method="BFGS", tol=1e-6,
+        #                           options={'disp': False, 'maxiter': 50000})#, constraints=cons)
+        #sol = g.x
+        #print("==================================================")
+        #print("xyz_rot")
+        #print(xyz_rot)
+        #print("joint_img")
+        #print(joint_img)
+        #joint_img[:,2] = joint_img[:,2]*sol + 112.5
+        #print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+        #print("max: {} | min: {}".format(str(np.min(joint_img[:,2])), str(np.max(joint_img[:,2]))))
+        #print("===================================")
+        #print("max: {} | min: {}".format(str(np.min(joint_img[:,0])), str(np.max(joint_img[:,0]))))
+        #print("====================================")
+        #print("max: {} | min: {}".format(str(np.min(joint_img[:,1])), str(np.max(joint_img[:,1]))))
+        #print(joint_img[:,2]*sol)
 
-        for i in range(len(joint_img)):
-            joint_img[i, 0:2] = augment.trans_point2d(joint_img[i, 0:2], trans)
-            joint_img[i, 2] /= (cfg.bbox_3d_shape[0]/2. * scale) # expect depth lies in -bbox_3d_shape[0]/2 ~ bbox_3d_shape[0]/2 -> -1.0 ~ 1.0
-            joint_img[i, 2] = (joint_img[i,2] + 1.0)/2. # 0~1 normalize
-            joint_vis[i] *= (
-                            (joint_img[i,0] >= 0) & \
-                            (joint_img[i,0] < cfg.input_shape[1]) & \
-                            (joint_img[i,1] >= 0) & \
-                            (joint_img[i,1] < cfg.input_shape[0]) & \
-                            (joint_img[i,2] >= 0) & \
-                            (joint_img[i,2] < 1)
-                            )
-        #print("---------------------------")
-        #print(cvimg)
-        #print(img_patch)
-        #print("---------------------------")
 
-        
-        #joint_img2 = np.zeros(joint_img.shape)
-        #joint_img2 = np.copy(joint_img)
-        fig = plt.figure()
-        ax1 = fig.add_subplot(121)
-        ax2 = fig.add_subplot(122)
-        
-        ax1.imshow((255*img_patch/np.max(img_patch)).astype(np.uint8))
-        ax2.imshow(cvimg)
-        #ax1.imshow(img2_w)
-        
-        FreiHand.plot_hand(ax1, joint_img[:, 0:2], order='uv')
-        FreiHand.plot_hand(ax2, joint_img2[:, 0:2], order='uv')
-        ax1.axis('off')
-        nn = str(random.randint(2001,3000))
-        plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
-        #print("hehehehehehe")
-        sys.exit()
-        vis = False
-        if vis:
-            filename = str(random.randrange(1,500))
-            tmpimg = img_patch.copy().astype(np.uint8)
-            tmpkps = np.zeros((3,joint_num))
-            tmpkps[:2,:] = joint_img[:,:2].transpose(1,0)
-            tmpkps[2,:] = joint_vis[:,0]
-            tmpimg = vis_keypoints(tmpimg, tmpkps, skeleton)
-            cv2.imwrite(osp.join(cfg.vis_dir, filename + '_gt.jpg'), tmpimg)
-        
-        vis = False
-        if vis:
-            vis_3d_skeleton(joint_img, joint_vis, skeleton, filename)
+        # 4. generate patch joint ground truth        
+        for n_jt in range(len(joint_img)):
+            joint_img[n_jt, 0:2] = augment.trans_point2d(joint_img[n_jt, 0:2], trans)
 
-        # change coordinates to output space
-        joint_img[:, 0] = joint_img[:, 0] / cfg.input_shape[1] * cfg.output_shape[1]
-        joint_img[:, 1] = joint_img[:, 1] / cfg.input_shape[0] * cfg.output_shape[0]
-        joint_img[:, 2] = joint_img[:, 2] * cfg.depth_dim
+
+        #=======================================================================
+        # fig = plt.figure()
+        #  
+        # ax1 = fig.add_subplot(121)
+        # ax2 = fig.add_subplot(122)
+        # # 
+        # ax1.imshow((255*img_patch/np.max(img_patch)).astype(np.uint8))
+        # ax2.imshow(cvimg)
+        # #ax1.imshow(img2_w)
+        # # 
+        # FreiHand.plot_hand(ax1, joint_img[:, 0:2], order='uv')
+        # FreiHand.plot_hand(ax2, joint_img_orig, order='uv')
+        # ax1.axis('off')
+        # nn = str(random.randint(2001,3000))
+        # plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
+        # sys.exit()
+        #=======================================================================
+              
+        img_patch = self.transform(img_patch)
+        # apply normalization
+        for n_c in range(img_channels):
+            img_patch[n_c, :, :] = np.clip(img_patch[n_c, :, :] * color_scale[n_c], 0, 255)
         
-        # change joint coord, vis to reference dataset. 0th db is reference dataset
-        if self.multiple_db:
-            # TODO Right now transform_joint_to_other_db just returns the inputs
-            # If implementing multiple datasources in the future, this method needs to be implemented
-            joints_name = None
-            ref_joints_name = None
-            joint_img = augment.transform_joint_to_other_db(joint_img, joints_name, ref_joints_name)        
-            joint_vis = augment.transform_joint_to_other_db(joint_vis, joints_name, ref_joints_name) 
-        if self.is_train:
-            img_patch = self.transform(img_patch)
-            joint_img = joint_img.astype(np.float32)
-            # TODO following line need to be done in Freihand            
-            joint_vis = (joint_vis > 0).astype(np.float32)
-            joints_have_depth = np.array([joints_have_depth]).astype(np.float32)
-            return img_patch, joint_img, joint_vis, joints_have_depth
-        else:
-            img_patch = self.transform(img_patch)
-            return img_patch
+        for n_jt in range(len(joint_img)):    
+            joint_img[n_jt, 2] = joint_img[n_jt, 2] / (width * scale) * cfg.patch_width
+            #else:
+            #    joints[n_jt, 2] = joints[n_jt, 2] / (rect_3d_width * scale) * patch_width
+        
+        #print("joints")
+        #print(joints)
+        #sys.exit()  
+    
+        # 5. get label of some type according to certain need
+        #joint_img = joint_img_orig
+        label, label_weight = generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)
+        #sys.exit()
+        #=======================================================================
+        # print("label")
+        # print(label)
+        # print("label_weight")
+        # print(label_weight)
+        # print("img_patch")
+        # print(img_patch.shape)
+        # sys.exit()    
+        #=======================================================================
+        #=======================================================================
+        # print(label_weight.shape)
+        # print(label.shape)
+        # print(img_patch.shape)
+        #=======================================================================
+        return img_patch, label, label_weight
         
 
         
@@ -209,5 +176,25 @@ class DatasetLoader(Dataset):
         if self.multiple_db:
             return max([len(db) for db in self.db]) * len(self.db)
         else:
-            return len(self.db)        
+            return len(self.db)
+        
+def generate_joint_location_label(patch_width, patch_height, joints, joints_vis):
+    #print("=============Inside generate_joint_location_label===========")
+    #print("JOINTS")
+    #print(joints)
+    joints[:, 0] = joints[:, 0] / patch_width - 0.5
+    joints[:, 1] = joints[:, 1] / patch_height - 0.5
+    joints[:, 2] = joints[:, 2] / patch_width
+    
+    joints = joints.reshape((-1))
+    joints_vis = joints_vis.reshape((-1))
+    return joints, joints_vis     
+        
+def F(alpha, X, U):
+    s = [np.sqrt((alpha*X[i, 0] - U[i,0])**2 +  (alpha*X[i, 1] - U[i,1])**2) for i in range(FreiHandConfig.num_joints)]
+    sol = np.sum(s)
+    return sol
+
+
+
     
