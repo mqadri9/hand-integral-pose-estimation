@@ -121,5 +121,49 @@ class Trainer(Base):
         self.start_epoch = start_epoch
         self.model = model
         self.optimizer = optimizer
-        self.scheduler = scheduler         
+        self.scheduler = scheduler
+        
+class Tester(Base):
+    
+    def __init__(self, cfg, test_epoch):
+        self.coord_out = loss.softmax_integral_tensor
+        self.test_epoch = int(test_epoch)
+        super(Tester, self).__init__(cfg, log_name = 'test_logs.txt')
+
+    def _make_batch_generator(self):
+        # data load and construct batch generator
+        self.logger.info("Creating dataset...")
+        testset = eval(self.cfg.testset)("testing")
+        testset_loader = DatasetLoader(testset, False, transforms.Compose([\
+                                                                                                        transforms.ToTensor(),
+                                                                                                        transforms.Normalize(mean=cfg.pixel_mean, std=cfg.pixel_std)]\
+                                                                                                        ))
+        batch_generator = DataLoader(dataset=testset_loader, batch_size=self.cfg.num_gpus*self.cfg.test_batch_size, shuffle=False, num_workers=self.cfg.num_thread, pin_memory=True)
+        
+        self.testset = testset
+        self.joint_num = testset_loader.joint_num
+        self.skeleton = testset_loader.skeleton
+        self.tot_sample_num = testset_loader.__len__()
+        self.batch_generator = batch_generator
+        self.num_samples = testset.num_samples
+        print("Number of testing samples is {}".format(self.num_samples))
+    
+    def _make_model(self):
+        
+        model_path = os.path.join(self.cfg.model_dir, 'snapshot_%d.pth.tar' % self.test_epoch)
+        assert os.path.exists(model_path), 'Cannot find model at ' + model_path
+        self.logger.info('Load checkpoint from {}'.format(model_path))
+        
+        # prepare network
+        self.logger.info("Creating graph...")
+        model = get_pose_net(self.cfg, False, self.joint_num)
+        model = DataParallelModel(model).cuda()
+        ckpt = torch.load(model_path)
+        model.load_state_dict(ckpt['network'])
+        model.eval()
+
+        self.model = model
+
+    def _evaluate(self, preds, result_save_path):
+        self.testset.evaluate(preds, result_save_path)
         

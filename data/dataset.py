@@ -38,7 +38,7 @@ class DatasetLoader(Dataset):
         else:
             self.multiple_db = False
             self.db = db.load_data()
-            self.joint_num = d.joint_num
+            self.joint_num = db.joint_num
             self.skeleton = db.skeleton
             #self.lr_skeleton = db.lr_skeleton
             #self.flip_pairs = db.flip_pairs
@@ -85,10 +85,10 @@ class DatasetLoader(Dataset):
             scale, R, color_scale = augment.get_aug_config()
             #scale, rot, color_scale = 1.0, 0, [1.0, 1.0, 1.0]
         else:
-            scale, R, color_scale = 1.0, 0, [1.0, 1.0, 1.0]
+            scale, R, color_scale = 1.0, np.eye(3), [1.0, 1.0, 1.0]
 
         #img_patch = self.transform(cvimg)
-        img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, width = augment.generate_patch_image(cvimg, joint_cam, scale, R, K)
+        img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox = augment.generate_patch_image(cvimg, joint_cam, scale, R, K)
         #img_patch = self.transform(cvimg)
         # 4. generate patch joint ground truth
         # color 
@@ -120,7 +120,7 @@ class DatasetLoader(Dataset):
 
         #=======================================================================
         # fig = plt.figure()
-        #  
+        #   
         # ax1 = fig.add_subplot(121)
         # ax2 = fig.add_subplot(122)
         # # 
@@ -129,20 +129,24 @@ class DatasetLoader(Dataset):
         # #ax1.imshow(img2_w)
         # # 
         # FreiHand.plot_hand(ax1, joint_img[:, 0:2], order='uv')
-        # FreiHand.plot_hand(ax2, joint_img_orig, order='uv')
+        # FreiHand.plot_hand(ax2, joint_img_orig[:, 0:2], order='uv')
         # ax1.axis('off')
-        # nn = str(random.randint(2001,3000))
+        # nn = str(random.randint(1,3000))
         # plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
+        # 
         # sys.exit()
         #=======================================================================
-              
+        #nn = str(random.randint(2001,3000))
+        #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), cv2.cvtColor(img_patch, cv2.COLOR_RGB2BGR))
+         
         img_patch = self.transform(img_patch)
         # apply normalization
         for n_c in range(img_channels):
             img_patch[n_c, :, :] = np.clip(img_patch[n_c, :, :] * color_scale[n_c], 0, 255)
         
         for n_jt in range(len(joint_img)):    
-            joint_img[n_jt, 2] = joint_img[n_jt, 2] / (width * scale) * cfg.patch_width
+            joint_img[n_jt, 2] = joint_img[n_jt, 2] / (bbox[2] * scale) * cfg.patch_width
+            
             #else:
             #    joints[n_jt, 2] = joints[n_jt, 2] / (rect_3d_width * scale) * patch_width
         
@@ -151,8 +155,12 @@ class DatasetLoader(Dataset):
         #sys.exit()  
     
         # 5. get label of some type according to certain need
+
         #joint_img = joint_img_orig
-        label, label_weight = generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)
+        #img_patch = self.transform(cvimg)
+        label, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)
+        #print(label)
+        #print(label_weight)
         #sys.exit()
         #=======================================================================
         # print("label")
@@ -177,19 +185,7 @@ class DatasetLoader(Dataset):
             return max([len(db) for db in self.db]) * len(self.db)
         else:
             return len(self.db)
-        
-def generate_joint_location_label(patch_width, patch_height, joints, joints_vis):
-    #print("=============Inside generate_joint_location_label===========")
-    #print("JOINTS")
-    #print(joints)
-    joints[:, 0] = joints[:, 0] / patch_width - 0.5
-    joints[:, 1] = joints[:, 1] / patch_height - 0.5
-    joints[:, 2] = joints[:, 2] / patch_width
     
-    joints = joints.reshape((-1))
-    joints_vis = joints_vis.reshape((-1))
-    return joints, joints_vis     
-        
 def F(alpha, X, U):
     s = [np.sqrt((alpha*X[i, 0] - U[i,0])**2 +  (alpha*X[i, 1] - U[i,1])**2) for i in range(FreiHandConfig.num_joints)]
     sol = np.sum(s)

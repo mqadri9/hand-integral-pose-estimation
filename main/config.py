@@ -19,33 +19,35 @@ class Config:
     
     input_shape = (224, 224) 
     output_shape = (input_shape[0]//4, input_shape[1]//4)
-    depth_dim = 54
+    depth_dim = input_shape[0]//4
     bbox_3d_shape = (2000, 2000, 2000) # depth, height, width
 
     # training config
-    lr_dec_epoch = [40, 45]
+    lr_dec_epoch = [80, 90]
     #end_epoch = 20
-    end_epoch = 50
+    end_epoch = 300
     lr = 1e-3
     lr_dec_factor = 0.1
     optimizer = 'adam'
     weight_decay = 1e-5
     batch_size = 32
+    test_batch_size = 32
     
     ## model setting
-    resnet_type = 50 # 18, 34, 50, 101, 152
+    resnet_type = 50 #50 # 18, 34, 50, 101, 152
     patch_width = 224
     patch_height = 224
     loss = "L1"
     num_gpus = 3
     # TODO Need to find the real values for the Freihand dataset
     # TODO move the pixel_mean and pixel_std to the Freihand specific config file: FreiHand_config.py?
-    pixel_mean = (0.3363, 0.4922, 0.4498)
-    pixel_std = (0.2089, 0.1973, 0.2238)
+    pixel_mean = (0.4559, 0.5142, 0.5148)
+    pixel_std = (0.2736, 0.2474, 0.2523)
     
     num_thread = 20
     
-    continue_train = True
+    
+    continue_train = False
     
     def set_args(self, gpu_ids, continue_train=False):
         self.gpu_ids = gpu_ids

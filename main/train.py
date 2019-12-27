@@ -26,7 +26,6 @@ def parse_args():
 def main():
     args = parse_args()
     cfg.set_args(args.gpu_ids, args.continue_train)
-    
     # Refer to https://github.com/soumith/cudnn.torch for a detailed 
     # explanation of these parameters
     cudnn.fastest = True
@@ -34,6 +33,7 @@ def main():
     cudnn.deterministic = False
     cudnn.enabled = True
     trainer = Trainer(cfg)
+    print(cfg.continue_train)
     trainer._make_batch_generator()
     trainer._make_model()
 
@@ -88,7 +88,6 @@ def main():
             trainer.tot_timer.toc()
             trainer.tot_timer.tic()
             trainer.read_timer.tic()
-
         trainer.save_model({
             'epoch': epoch,
             'network': trainer.model.state_dict(),

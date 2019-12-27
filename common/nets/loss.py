@@ -56,11 +56,10 @@ class JointLocationLoss(nn.Module):
     def forward(self, heatmap_out, gt_coord, gt_vis):
         
         joint_num = int(gt_coord.shape[1]/3)
-        
+        #print(heatmap_out.shape)
         hm_width = heatmap_out.shape[-1]
         hm_height = heatmap_out.shape[-2]
         hm_depth = heatmap_out.shape[-3] // FreiHandConfig.num_joints
-        
         coord_out = softmax_integral_tensor(heatmap_out, joint_num, hm_width, hm_height, hm_depth)
         
         _assert_no_grad(gt_coord)
