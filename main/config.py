@@ -39,7 +39,6 @@ class Config:
     patch_height = 224
     loss = "L1"
     num_gpus = 3
-    # TODO Need to find the real values for the Freihand dataset
     # TODO move the pixel_mean and pixel_std to the Freihand specific config file: FreiHand_config.py?
     pixel_mean = (0.4559, 0.5142, 0.5148)
     pixel_std = (0.2736, 0.2474, 0.2523)

@@ -88,6 +88,8 @@ class DatasetLoader(Dataset):
             scale, R, color_scale = 1.0, np.eye(3), [1.0, 1.0, 1.0]
 
         #img_patch = self.transform(cvimg)
+        #print(data['img_path'])
+        #R = np.eye(3)
         img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox = augment.generate_patch_image(cvimg, joint_cam, scale, R, K)
         #img_patch = self.transform(cvimg)
         # 4. generate patch joint ground truth
@@ -133,9 +135,9 @@ class DatasetLoader(Dataset):
         # ax1.axis('off')
         # nn = str(random.randint(1,3000))
         # plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
-        # 
-        # sys.exit()
         #=======================================================================
+        
+        #sys.exit()
         #nn = str(random.randint(2001,3000))
         #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), cv2.cvtColor(img_patch, cv2.COLOR_RGB2BGR))
          
@@ -158,17 +160,18 @@ class DatasetLoader(Dataset):
 
         #joint_img = joint_img_orig
         #img_patch = self.transform(cvimg)
+
         label, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)
         #print(label)
         #print(label_weight)
         #sys.exit()
         #=======================================================================
-        # print("label")
-        # print(label)
-        # print("label_weight")
-        # print(label_weight)
-        # print("img_patch")
-        # print(img_patch.shape)
+        #print("label")
+        #print(label)
+        #print("label_weight")
+        #print(label_weight)
+        #print("img_patch")
+        #print(img_patch)
         # sys.exit()    
         #=======================================================================
         #=======================================================================

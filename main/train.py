@@ -60,6 +60,7 @@ def main():
             # 
             # print("===============================================")
             #===================================================================
+            #print(label)
             img_patch = img_patch.cuda()
             label = label.cuda()
             label_weight = label_weight.cuda()
@@ -88,12 +89,13 @@ def main():
             trainer.tot_timer.toc()
             trainer.tot_timer.tic()
             trainer.read_timer.tic()
-        trainer.save_model({
-            'epoch': epoch,
-            'network': trainer.model.state_dict(),
-            'optimizer': trainer.optimizer.state_dict(),
-            'scheduler': trainer.scheduler.state_dict(),
-        }, epoch)
+        if epoch > 290:
+            trainer.save_model({
+                'epoch': epoch,
+                'network': trainer.model.state_dict(),
+                'optimizer': trainer.optimizer.state_dict(),
+                'scheduler': trainer.scheduler.state_dict(),
+            }, epoch)
   
 if __name__ == "__main__":
     main()

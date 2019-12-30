@@ -128,6 +128,7 @@ class Tester(Base):
     def __init__(self, cfg, test_epoch):
         self.coord_out = loss.softmax_integral_tensor
         self.test_epoch = int(test_epoch)
+        self.JointLocationLoss = DataParallelCriterion(loss.JointLocationLoss())
         super(Tester, self).__init__(cfg, log_name = 'test_logs.txt')
 
     def _make_batch_generator(self):

@@ -7,7 +7,7 @@ from config import cfg
 import torch
 from base import Tester
 from torch.nn.parallel.scatter_gather import gather
-from nets.loss import softmax_integral_tensor
+from nets.loss import softmax_integral_tensor, JointLocationLoss
 #from utils.vis import vis_keypoints
 #from utils.pose_utils import flip
 import torch.backends.cudnn as cudnn
@@ -54,12 +54,12 @@ def main():
             heatmap_out = tester.model(input_img)
             if cfg.num_gpus > 1:
                 heatmap_out = gather(heatmap_out,0)
+            JointLocationLoss = tester.JointLocationLoss(heatmap_out, label, label_weight)
+            print("Loss loc {}".format(JointLocationLoss.detach()))
             coord_out = softmax_integral_tensor(heatmap_out, tester.joint_num, cfg.output_shape[0], cfg.output_shape[1], cfg.depth_dim)
             coord_out = coord_out.cpu().numpy()
             label = label.cpu().numpy()
             label_weight = label_weight.cpu().numpy()
-            #loss = np.abs(coord_out - label) * label_weight
-            #print(loss.sum() / len(coord_out))
             preds.append(coord_out)
             preds_in_patch_with_score.append(augment.get_joint_location_result(cfg.patch_width, cfg.patch_height, heatmap_out))
     preds = np.concatenate(preds, axis=0)

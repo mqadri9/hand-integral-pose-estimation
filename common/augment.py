@@ -9,7 +9,9 @@ from random import uniform
 from config import cfg
 from FreiHand_config import FreiHandConfig
 from nets.loss import softmax_integral_tensor
+import matplotlib.pyplot as plt
 
+plt.switch_backend('agg')
 
 def compute_similarity_transform(X, Y, compute_optimal_scale=False):
     """
@@ -72,19 +74,33 @@ def compute_similarity_transform(X, Y, compute_optimal_scale=False):
 
     return d, Z, T, b, c
 
+
+def projectPoints(xyz, R, K):
+    """ Project 3D coordinates into image space. """
+    xyz = np.array(xyz)
+    K = np.array(K)
+    #uv = np.matmul(K, xyz.T).T
+    xyz_rot = np.matmul(R, xyz.T).T
+    uv = np.matmul(K, xyz_rot.T).T
+    return uv[:, :2] / uv[:, -1:], xyz_rot[:, -1]*1000, xyz_rot
+
 def pixel2cam(pixel_coord, K):
-    c = []
-    f = []
-    c.append(K[0, 2])
-    c.append(K[1, 2])
-    f.append(K[0, 0])
-    f.append(K[1, 1])
+
+    uv = np.ones(pixel_coord.shape)
+    uv[:, 0] = pixel_coord[:, 0]
+    uv[:, 1] = pixel_coord[:, 1]
+    xyz = np.matmul(np.linalg.inv(K), uv.T).T
+    #print("xyz")
+    #print(xyz)
     pixel_coord[..., 2] = pixel_coord[..., 2]/1000
-    x = (pixel_coord[..., 0] - c[0]) / f[0] * pixel_coord[..., 2]
-    y = (pixel_coord[..., 1] - c[1]) / f[1] * pixel_coord[..., 2]
-    z = pixel_coord[..., 2]
+    #print("pixel z")
+    #print(pixel_coord[..., 2])
+    xyz *= np.expand_dims(pixel_coord[..., 2], axis=1)
+    #x = (pixel_coord[..., 0] - c[0]) / f[0] * pixel_coord[..., 2]
+    #y = (pixel_coord[..., 1] - c[1]) / f[1] * pixel_coord[..., 2]
+    #z = pixel_coord[..., 2]
     
-    return x,y,z
+    return xyz
 
 def generate_joint_location_label(patch_width, patch_height, joints, joints_vis):
     #print("=============Inside generate_joint_location_label===========")
@@ -127,6 +143,7 @@ def get_joint_location_result(patch_width, patch_height, preds):
 def trans_coords_from_patch_to_org(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, trans):
     coords_in_org = coords_in_patch.copy()
     for p in range(coords_in_patch.shape[0]):
+        a = trans_point2d(coords_in_patch[p, 0:2], trans)
         coords_in_org[p, 0:2] = trans_point2d(coords_in_patch[p, 0:2], trans)
     return coords_in_org
 
@@ -204,15 +221,6 @@ def calc_kpt_bound(kpts, kpts_vis):
         l = min(l, x[idx])
         r = max(r, x[idx])
     return u, d, l, r
-
-def projectPoints(xyz, R, K):
-    """ Project 3D coordinates into image space. """
-    xyz = np.array(xyz)
-    K = np.array(K)
-    #uv = np.matmul(K, xyz.T).T
-    xyz_rot = np.matmul(R, xyz.T).T
-    uv = np.matmul(K, xyz_rot.T).T
-    return uv[:, :2] / uv[:, -1:], xyz_rot[:, -1]*1000, xyz_rot
 
 def find_bb(uv, joint_vis, aspect_ratio=1.0):
     u, d, l, r = calc_kpt_bound(uv, joint_vis)
