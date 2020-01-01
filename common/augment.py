@@ -10,6 +10,7 @@ from config import cfg
 from FreiHand_config import FreiHandConfig
 from nets.loss import softmax_integral_tensor
 import matplotlib.pyplot as plt
+import pdb
 
 plt.switch_backend('agg')
 
@@ -150,7 +151,7 @@ def trans_coords_from_patch_to_org(coords_in_patch, c_x, c_y, bb_width, bb_heigh
 
 def trans_coords_from_patch_to_org_3d(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, trans):
     res_img = trans_coords_from_patch_to_org(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, trans)
-    res_img[:, 2] = coords_in_patch[:, 2] / cfg.patch_width * bb_width
+    res_img[:, 2] = coords_in_patch[:, 2] / cfg.patch_width * cfg.bbox_3d_shape[0]
     return res_img
 
 # helper functions
@@ -191,17 +192,30 @@ def sample_rotation_matrix():
     # Rotate with a probability of 40 percent
     # Right now the only rotation is around the z axis from -30 deg tp 30 deg
     
+    # TODO generate a small rotation matrix around an arbitrary vector and multiply them together
     if random.random() <= 0.6:
         return np.eye(3)    
     theta = uniform(-0.52, 0.52)
+    #theta = -0.52
     if np.abs(theta) < 1e-4:
-        return np.eye(3)
-    s = np.zeros((2,1))
-    r = np.random.randn(1,1)
-    r = np.vstack((s, r))
-    r = theta*(r/np.linalg.norm(r))
-    #print(r.shape)
-    R, _ = cv2.Rodrigues(r)
+        R1 = np.eye(3)
+    else:
+        s = np.zeros((2,1))
+        r = np.random.randn(1,1)
+        r = np.vstack((s, r))
+        r = theta*(r/np.linalg.norm(r))
+        #print(r.shape)
+        R1, _ = cv2.Rodrigues(r)
+    #R1 = np.eye(3)
+    theta = uniform(-0.05, 0.05)
+    #theta = 0.09
+    if np.abs(theta) < 1e-4:
+        R2 = np.eye(3)
+    else:
+        r = np.random.randn(3,1)    
+        r = theta*(r/np.linalg.norm(r))
+        R2, _ = cv2.Rodrigues(r)
+    R = np.matmul(R1, R2)
     return np.array(R)
 
 def calc_kpt_bound(kpts, kpts_vis):
@@ -244,7 +258,40 @@ def find_bb(uv, joint_vis, aspect_ratio=1.0):
     
     bbox = [center_x, center_y, w, h]
     return bbox
-  
+
+#===============================================================================
+# def find_perspective_bounds(T, cvimg):
+#     src_w = cvimg.shape[1]
+#     src_h = cvimg.shape[0]
+#     
+#     src_l = np.array([0, 0, 1], dtype=np.float32) # start_c
+#     src_r = np.array([0, src_h, 1], dtype=np.float32) # start_a
+#     src_t = np.array([src_w, 0, 1], dtype=np.float32) # start_b
+#     src_b = np.array([src_w, src_h, 1], dtype=np.float32) # start_d
+# 
+#     dst = np.zeros((3, 4), dtype=np.float32)
+#     dst[:,0] = src_l
+#     dst[:,1] = src_t
+#     dst[:,2] = src_b
+#     dst[:,3] = src_r
+# 
+#     P = T @ dst
+# 
+#     P = P / P[2]
+# 
+#     minx = np.min(P[0])
+#     maxx = np.max(P[0])
+#     miny = np.min(P[1])
+#     maxy = np.max(P[1])
+# 
+#     dst_w = maxx - minx
+#     dst_h = maxy - miny
+#     
+#     return dst_w, dst_h
+#===============================================================================
+
+    
+
 def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=False): 
     img = cvimg.copy()
     img_height, img_width, img_channels = img.shape
@@ -258,7 +305,9 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
 
     
     homo = K.dot(R).dot(np.linalg.inv(K))
-    img2_w = cv2.warpPerspective(cvimg, homo, (cvimg.shape[1], cvimg.shape[0]))        
+    #dst_w, dst_h = find_perspective_bounds(homo, cvimg)
+    img2_w = cv2.warpPerspective(cvimg, homo, (cvimg.shape[1], cvimg.shape[0]))
+    #img2_w = cv2.warpPerspective(cvimg, homo, (int(dst_h), int(dst_w)))
 
     joint_vis = np.ones(joint_cam.shape, dtype=np.float)
     #vis = np.ones(joint_cam.shape)
@@ -273,7 +322,7 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
     joint_img[:,2] = np.squeeze(z - z[FreiHandConfig.root_idx])
     
     bbox = find_bb(uv, joint_vis)
-        
+    
     bb_c_x = float(bbox[0])
     bb_c_y = float(bbox[1])
     bb_width = float(bbox[2])

@@ -58,8 +58,6 @@ def main():
             print("Loss loc {}".format(JointLocationLoss.detach()))
             coord_out = softmax_integral_tensor(heatmap_out, tester.joint_num, cfg.output_shape[0], cfg.output_shape[1], cfg.depth_dim)
             coord_out = coord_out.cpu().numpy()
-            label = label.cpu().numpy()
-            label_weight = label_weight.cpu().numpy()
             preds.append(coord_out)
             preds_in_patch_with_score.append(augment.get_joint_location_result(cfg.patch_width, cfg.patch_height, heatmap_out))
     preds = np.concatenate(preds, axis=0)

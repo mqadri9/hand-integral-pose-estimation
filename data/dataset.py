@@ -122,7 +122,7 @@ class DatasetLoader(Dataset):
 
         #=======================================================================
         # fig = plt.figure()
-        #   
+        #    
         # ax1 = fig.add_subplot(121)
         # ax2 = fig.add_subplot(122)
         # # 
@@ -135,9 +135,9 @@ class DatasetLoader(Dataset):
         # ax1.axis('off')
         # nn = str(random.randint(1,3000))
         # plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
+        # 
+        # sys.exit()
         #=======================================================================
-        
-        #sys.exit()
         #nn = str(random.randint(2001,3000))
         #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), cv2.cvtColor(img_patch, cv2.COLOR_RGB2BGR))
          
@@ -146,9 +146,11 @@ class DatasetLoader(Dataset):
         for n_c in range(img_channels):
             img_patch[n_c, :, :] = np.clip(img_patch[n_c, :, :] * color_scale[n_c], 0, 255)
         
-        for n_jt in range(len(joint_img)):    
-            joint_img[n_jt, 2] = joint_img[n_jt, 2] / (bbox[2] * scale) * cfg.patch_width
-            
+        for n_jt in range(len(joint_img)):
+            # TODO divide by rect_3d_width
+            joint_img[n_jt, 2] = joint_img[n_jt, 2] / (cfg.bbox_3d_shape[0] * scale) * cfg.patch_width
+        #print(bbox[2])
+        #sys.exit()
             #else:
             #    joints[n_jt, 2] = joints[n_jt, 2] / (rect_3d_width * scale) * patch_width
         

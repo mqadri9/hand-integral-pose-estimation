@@ -20,14 +20,16 @@ class Config:
     input_shape = (224, 224) 
     output_shape = (input_shape[0]//4, input_shape[1]//4)
     depth_dim = input_shape[0]//4
-    bbox_3d_shape = (2000, 2000, 2000) # depth, height, width
+    bbox_3d_shape = (300, 300, 300) # depth, height, width
 
     # training config
-    lr_dec_epoch = [80, 90]
+    lr_dec_epoch = [60, 120, 180, 240]
+    # lr_dec_epoch = [80, 90]
     #end_epoch = 20
     end_epoch = 300
     lr = 1e-3
-    lr_dec_factor = 0.1
+    lr_dec_factor = 0.5
+    # lr_dec_factor = 0.1
     optimizer = 'adam'
     weight_decay = 1e-5
     batch_size = 32

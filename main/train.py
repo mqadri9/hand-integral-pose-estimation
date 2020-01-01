@@ -4,6 +4,10 @@ from base import Trainer
 import torch.backends.cudnn as cudnn
 import sys
 import numpy as np
+from base import Tester
+from tqdm import tqdm
+from torch.nn.parallel.scatter_gather import gather
+import torch
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -33,40 +37,24 @@ def main():
     cudnn.deterministic = False
     cudnn.enabled = True
     trainer = Trainer(cfg)
-    print(cfg.continue_train)
     trainer._make_batch_generator()
     trainer._make_model()
-
+    tester = Tester(cfg, trainer.start_epoch)
+    tester._make_batch_generator()
     for epoch in range(trainer.start_epoch, cfg.end_epoch):
         trainer.scheduler.step()
         trainer.tot_timer.tic()
         trainer.read_timer.tic()
 
         for itr, (img_patch, label, label_weight) in enumerate(trainer.batch_generator):
-        #for itr, kk in enumerate(trainer.batch_generator):
-            #print(kk)
-            #sys.exit()
             trainer.read_timer.toc()
             trainer.gpu_timer.tic()
-
             trainer.optimizer.zero_grad()
-            #===================================================================
-            # print("==============================================")
-            # print(input_img.shape)
-            # print(joint_img.shape)
-            # print(joint_vis.shape)
-            # print(joints_have_depth.shape)
-            # #print(joints_have_depth)
-            # 
-            # print("===============================================")
-            #===================================================================
-            #print(label)
             img_patch = img_patch.cuda()
             label = label.cuda()
             label_weight = label_weight.cuda()
             
             heatmap_out = trainer.model(img_patch)
-            #print(len(heatmap_out))
             JointLocationLoss = trainer.JointLocationLoss(heatmap_out, label, label_weight)
 
             loss = JointLocationLoss
@@ -89,7 +77,28 @@ def main():
             trainer.tot_timer.toc()
             trainer.tot_timer.tic()
             trainer.read_timer.tic()
-        if epoch > 290:
+        print("Finished epoch {}. Calculating test error".format(epoch))
+        with torch.no_grad():
+            loss_sum = 0
+            tester.test_epoch = epoch
+            i = 0
+            for itr, (input_img, label, label_weight) in enumerate(tqdm(tester.batch_generator)):
+                i+=1
+                input_img = input_img
+                label = label
+                label_weight = label_weight
+                heatmap_out = trainer.model(input_img)
+                #if cfg.num_gpus > 1:
+                #    heatmap_out = gather(heatmap_out,0)
+                JointLocationLoss = tester.JointLocationLoss(heatmap_out, label, label_weight)
+                loss_sum += JointLocationLoss.detach()
+            screen = [
+               'Epoch %d/%d' % (epoch, cfg.end_epoch),
+               '%s: %.4f' % ('Average loss on test set', loss_sum/i),
+               ]
+            tester.logger.info(' '.join(screen))
+            
+        if epoch >= 0:
             trainer.save_model({
                 'epoch': epoch,
                 'network': trainer.model.state_dict(),
