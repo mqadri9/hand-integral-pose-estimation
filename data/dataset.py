@@ -18,6 +18,7 @@ import augment
 from FreiHand_config import FreiHandConfig
 
 plt.switch_backend('agg')
+
 class DatasetLoader(Dataset):
     """Create the dataset_loader
     db: a list of datasets (Listed in the config.py trainset list)
@@ -81,6 +82,7 @@ class DatasetLoader(Dataset):
         img_height, img_width, img_channels = cvimg.shape
         
         # 2. get augmentation params
+        #self.do_augment = True
         if self.do_augment:
             scale, R, color_scale = augment.get_aug_config()
             #scale, rot, color_scale = 1.0, 0, [1.0, 1.0, 1.0]
@@ -90,7 +92,22 @@ class DatasetLoader(Dataset):
         #img_patch = self.transform(cvimg)
         #print(data['img_path'])
         #R = np.eye(3)
-        img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox = augment.generate_patch_image(cvimg, joint_cam, scale, R, K)
+        img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean = augment.generate_patch_image(cvimg, joint_cam, scale, R, K)
+        augmentation = {
+            "R": R,
+            "cvimg": cvimg,
+            "K": K,
+            "joint_cam": joint_cam,
+            "scale": scale,
+            "img_path": data['img_path'],
+            "zoom_factor": zoom_factor,
+            "f": f,
+            "z_mean": z_mean,
+            "bbox": bbox,
+            "trans": trans,
+            "joint_img": np.copy(joint_img)
+            
+        }
         #img_patch = self.transform(cvimg)
         # 4. generate patch joint ground truth
         # color 
@@ -119,10 +136,10 @@ class DatasetLoader(Dataset):
         for n_jt in range(len(joint_img)):
             joint_img[n_jt, 0:2] = augment.trans_point2d(joint_img[n_jt, 0:2], trans)
 
-
+        augmentation["joint_img2"] = np.copy(joint_img)
         #=======================================================================
         # fig = plt.figure()
-        #    
+        #      
         # ax1 = fig.add_subplot(121)
         # ax2 = fig.add_subplot(122)
         # # 
@@ -134,10 +151,12 @@ class DatasetLoader(Dataset):
         # FreiHand.plot_hand(ax2, joint_img_orig[:, 0:2], order='uv')
         # ax1.axis('off')
         # nn = str(random.randint(1,3000))
+        # #print("=============================================================")
+        # #print(nn)
         # plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
-        # 
-        # sys.exit()
         #=======================================================================
+        
+        #sys.exit()
         #nn = str(random.randint(2001,3000))
         #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), cv2.cvtColor(img_patch, cv2.COLOR_RGB2BGR))
          
@@ -148,7 +167,14 @@ class DatasetLoader(Dataset):
         
         for n_jt in range(len(joint_img)):
             # TODO divide by rect_3d_width
-            joint_img[n_jt, 2] = joint_img[n_jt, 2] / (cfg.bbox_3d_shape[0] * scale) * cfg.patch_width
+            zoom_factor = max(bbox[3], bbox[2])
+            #joint_img[n_jt, 2] = (joint_img[n_jt, 2] * f * zoom_factor) / (z_mean * cfg.patch_width)
+            joint_img[n_jt, 2] = joint_img[n_jt, 2] / (zoom_factor * scale) * cfg.patch_width
+            
+            #joint_img[n_jt, 2] = joint_img[n_jt, 2] / (cfg.bbox_3d_shape[0] * scale) * cfg.patch_width
+        
+        augmentation["joint_img3"] = np.copy(joint_img)
+        #augmentation['tmp'] = tmp    
         #print(bbox[2])
         #sys.exit()
             #else:
@@ -159,11 +185,12 @@ class DatasetLoader(Dataset):
         #sys.exit()  
     
         # 5. get label of some type according to certain need
-
+        #print(joint_img)
         #joint_img = joint_img_orig
         #img_patch = self.transform(cvimg)
 
         label, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)
+        augmentation["joint_img4"] = np.copy(label)
         #print(label)
         #print(label_weight)
         #sys.exit()
@@ -181,8 +208,17 @@ class DatasetLoader(Dataset):
         # print(label.shape)
         # print(img_patch.shape)
         #=======================================================================
-        return img_patch, label, label_weight
-        
+        #augmentation['label'] = label
+        if self.is_train:
+            return img_patch, label, label_weight, augmentation
+        else:
+            data = {
+                "img_patch": img_patch,
+                "label": label,
+                "label_weight": label_weight,
+                "augmentation": augmentation
+            }
+            return data
 
         
     def __len__(self):

@@ -72,11 +72,13 @@ class Trainer(Base):
     
     def __init__(self, cfg):
         self.JointLocationLoss = DataParallelCriterion(loss.JointLocationLoss())
+        self.JointLocationLoss2 = DataParallelCriterion(loss.JointLocationLoss2())
         super(Trainer, self).__init__(cfg, log_name = 'train_logs.txt')    
 
     def get_optimizer(self, optimizer_name, model):
         if optimizer_name == 'adam':
-            optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.lr)
+            lr = self.cfg.lr
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         elif optimizer_name == 'sgd':
             optimizer = torch.optim.SGD(model.parameters(), lr=self.cfg.lr, momentum=self.cfg.momentum, weight_decay=self.cfg.wd) 
         else:
@@ -84,6 +86,8 @@ class Trainer(Base):
             assert 0
 
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=self.cfg.lr_dec_epoch, gamma=self.cfg.lr_dec_factor)
+        print(self.cfg.lr_dec_epoch)
+        print(scheduler.get_lr())
         return optimizer, scheduler
     
     def _make_batch_generator(self, main_loop=True):
@@ -117,11 +121,13 @@ class Trainer(Base):
         else:
             start_epoch = 0
         model.train()
-
+        #optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
         self.start_epoch = start_epoch
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
+        print(start_epoch)
+        print(scheduler.get_lr())
         
 class Tester(Base):
     
@@ -129,16 +135,15 @@ class Tester(Base):
         self.coord_out = loss.softmax_integral_tensor
         self.test_epoch = int(test_epoch)
         self.JointLocationLoss = DataParallelCriterion(loss.JointLocationLoss())
+        self.JointLocationLoss2 = DataParallelCriterion(loss.JointLocationLoss2())
         super(Tester, self).__init__(cfg, log_name = 'test_logs.txt')
 
     def _make_batch_generator(self):
         # data load and construct batch generator
         self.logger.info("Creating dataset...")
         testset = eval(self.cfg.testset)("testing")
-        testset_loader = DatasetLoader(testset, False, transforms.Compose([\
-                                                                                                        transforms.ToTensor(),
-                                                                                                        transforms.Normalize(mean=cfg.pixel_mean, std=cfg.pixel_std)]\
-                                                                                                        ))
+        testset_loader = DatasetLoader(testset, False, transforms.Compose([transforms.ToTensor(), 
+                                                                           transforms.Normalize(mean=cfg.pixel_mean, std=cfg.pixel_std)]))
         batch_generator = DataLoader(dataset=testset_loader, batch_size=self.cfg.num_gpus*self.cfg.test_batch_size, shuffle=False, num_workers=self.cfg.num_thread, pin_memory=True)
         
         self.testset = testset
@@ -165,6 +170,6 @@ class Tester(Base):
 
         self.model = model
 
-    def _evaluate(self, preds, result_save_path):
-        self.testset.evaluate(preds, result_save_path)
+    def _evaluate(self, preds, label_list, augmentation_list, result_save_path):
+        self.testset.evaluate(preds, label_list, augmentation_list,  result_save_path)
         

@@ -46,7 +46,7 @@ def main():
         trainer.tot_timer.tic()
         trainer.read_timer.tic()
 
-        for itr, (img_patch, label, label_weight) in enumerate(trainer.batch_generator):
+        for itr, (img_patch, label, label_weight, augmentation) in enumerate(trainer.batch_generator):
             trainer.read_timer.toc()
             trainer.gpu_timer.tic()
             trainer.optimizer.zero_grad()
@@ -54,8 +54,23 @@ def main():
             label = label.cuda()
             label_weight = label_weight.cuda()
             
+            center_x = augmentation["bbox"][0].cuda()
+            center_y = augmentation["bbox"][1].cuda()
+            width = augmentation["bbox"][2].cuda()
+            height = augmentation["bbox"][3].cuda()
+            scale = augmentation["scale"].cuda()
+            R = augmentation["R"].cuda()
+            trans = augmentation["trans"].cuda()
+            zoom_factor = augmentation["zoom_factor"].cuda()
+            z_mean = augmentation["z_mean"].cuda()
+            f = augmentation["f"].cuda()
+            K = augmentation["K"].cuda()
+            joint_cam = augmentation["joint_cam"].cuda()
             heatmap_out = trainer.model(img_patch)
             JointLocationLoss = trainer.JointLocationLoss(heatmap_out, label, label_weight)
+            JointLocationLoss2 = trainer.JointLocationLoss2(heatmap_out, label, label_weight, joint_cam, center_x,
+                                                           center_y, width, height, scale, R, trans,
+                                                           zoom_factor, z_mean, f, K)
 
             loss = JointLocationLoss
 
@@ -70,7 +85,7 @@ def main():
                 'speed: %.2f(%.2fs r%.2f)s/itr' % (
                     trainer.tot_timer.average_time, trainer.gpu_timer.average_time, trainer.read_timer.average_time),
                 '%.2fh/epoch' % (trainer.tot_timer.average_time / 3600. * trainer.itr_per_epoch),
-                '%s: %.4f' % ('loss_loc', JointLocationLoss.detach()),
+                '%s: %.4f | %.4f' % ('loss_loc', JointLocationLoss.detach(), JointLocationLoss2.detach()) #.detach()),
                 ]
             trainer.logger.info(' '.join(screen))
 
@@ -80,21 +95,39 @@ def main():
         print("Finished epoch {}. Calculating test error".format(epoch))
         with torch.no_grad():
             loss_sum = 0
+            loss_sum2 = 0
             tester.test_epoch = epoch
             i = 0
-            for itr, (input_img, label, label_weight) in enumerate(tqdm(tester.batch_generator)):
+            for itr, data in enumerate(tqdm(tester.batch_generator)):
                 i+=1
-                input_img = input_img
-                label = label
-                label_weight = label_weight
+                input_img = data["img_patch"]
+                label = data["label"]
+                label_weight = data["label_weight"]
+                center_x = data["augmentation"]["bbox"][0].cuda()
+                center_y = data["augmentation"]["bbox"][1].cuda()
+                width = data["augmentation"]["bbox"][2].cuda()
+                height = data["augmentation"]["bbox"][3].cuda()
+                scale = data["augmentation"]["scale"].cuda()
+                R = data["augmentation"]["R"].cuda()
+                trans = data["augmentation"]["trans"].cuda()
+                zoom_factor = data["augmentation"]["zoom_factor"].cuda()
+                z_mean = data["augmentation"]["z_mean"].cuda()
+                f = data["augmentation"]["f"].cuda()
+                K = data["augmentation"]["K"].cuda()
+                joint_cam = data["augmentation"]["joint_cam"].cuda()
                 heatmap_out = trainer.model(input_img)
                 #if cfg.num_gpus > 1:
                 #    heatmap_out = gather(heatmap_out,0)
-                JointLocationLoss = tester.JointLocationLoss(heatmap_out, label, label_weight)
+                JointLocationLoss = trainer.JointLocationLoss(heatmap_out, label, label_weight)
+                JointLocationLoss2 = trainer.JointLocationLoss2(heatmap_out, label, label_weight, joint_cam, center_x,
+                                                               center_y, width, height, scale, R, trans,
+                                                               zoom_factor, z_mean, f, K)
+
+                loss_sum2 += JointLocationLoss2.detach()
                 loss_sum += JointLocationLoss.detach()
             screen = [
                'Epoch %d/%d' % (epoch, cfg.end_epoch),
-               '%s: %.4f' % ('Average loss on test set', loss_sum/i),
+               '%s: %.4f | %.4f' % ('Average loss on test set', loss_sum/i, loss_sum2/i),
                ]
             tester.logger.info(' '.join(screen))
             

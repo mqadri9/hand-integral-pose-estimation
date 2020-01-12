@@ -1,4 +1,4 @@
-import os
+import os, sys
 import numpy as np
 import cv2
 import random
@@ -80,7 +80,6 @@ def projectPoints(xyz, R, K):
     """ Project 3D coordinates into image space. """
     xyz = np.array(xyz)
     K = np.array(K)
-    #uv = np.matmul(K, xyz.T).T
     xyz_rot = np.matmul(R, xyz.T).T
     uv = np.matmul(K, xyz_rot.T).T
     return uv[:, :2] / uv[:, -1:], xyz_rot[:, -1]*1000, xyz_rot
@@ -91,17 +90,12 @@ def pixel2cam(pixel_coord, K):
     uv[:, 0] = pixel_coord[:, 0]
     uv[:, 1] = pixel_coord[:, 1]
     xyz = np.matmul(np.linalg.inv(K), uv.T).T
-    #print("xyz")
-    #print(xyz)
     pixel_coord[..., 2] = pixel_coord[..., 2]/1000
-    #print("pixel z")
-    #print(pixel_coord[..., 2])
     xyz *= np.expand_dims(pixel_coord[..., 2], axis=1)
-    #x = (pixel_coord[..., 0] - c[0]) / f[0] * pixel_coord[..., 2]
-    #y = (pixel_coord[..., 1] - c[1]) / f[1] * pixel_coord[..., 2]
-    #z = pixel_coord[..., 2]
     
     return xyz
+
+
 
 def generate_joint_location_label(patch_width, patch_height, joints, joints_vis):
     #print("=============Inside generate_joint_location_label===========")
@@ -141,17 +135,28 @@ def get_joint_location_result(patch_width, patch_height, preds):
 
     return coords
 
+def test_get_joint_loc_res(label):
+    label = label.astype(float)
+    label = label.reshape((label.shape[0], int(label.shape[1] / 3), 3))
+    label[:, :, 0] = (label[:, :, 0] + 0.5) * cfg.patch_width
+    label[:, :, 1] = (label[:, :, 1] + 0.5) * cfg.patch_height
+    label[:, :, 2] = label[:, :, 2] * cfg.patch_width
+    return label   
+
 def trans_coords_from_patch_to_org(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, trans):
     coords_in_org = coords_in_patch.copy()
     for p in range(coords_in_patch.shape[0]):
-        a = trans_point2d(coords_in_patch[p, 0:2], trans)
         coords_in_org[p, 0:2] = trans_point2d(coords_in_patch[p, 0:2], trans)
     return coords_in_org
 
 
-def trans_coords_from_patch_to_org_3d(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, trans):
+def trans_coords_from_patch_to_org_3d(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, scale, trans, zoom_factor, z_mean, f):
     res_img = trans_coords_from_patch_to_org(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, trans)
-    res_img[:, 2] = coords_in_patch[:, 2] / cfg.patch_width * cfg.bbox_3d_shape[0]
+    zoom_factor = max(bb_width, bb_height)
+    #res_img[:, 2] = (coords_in_patch[:, 2] / cfg.patch_width) * cfg.bbox_3d_shape[0] * scale
+    #print(coords_in_patch[:, 2])
+    res_img[:, 2] = coords_in_patch[:, 2] / cfg.patch_width * (zoom_factor * scale)
+    #res_img[:, 2] = (coords_in_patch[:, 2] * cfg.patch_width * z_mean) / (zoom_factor * f)
     return res_img
 
 # helper functions
@@ -173,13 +178,12 @@ def transform_joint_to_other_db(src_joint, src_name, dst_name):
 def get_aug_config():
     
     scale_factor = 0.25
-    rot_factor = 30
     color_factor = 0.2
     
     #scale = np.clip(np.random.randn(), -1.0, 1.0) * scale_factor + 1.0
+    scale = 1.0
     #rot = np.clip(np.random.randn(), -2.0,
     #              2.0) * rot_factor if random.random() <= 0.6 else 0
-    scale = 1
     rot = sample_rotation_matrix()
     
     c_up = 1.0 + color_factor
@@ -196,7 +200,7 @@ def sample_rotation_matrix():
     if random.random() <= 0.6:
         return np.eye(3)    
     theta = uniform(-0.52, 0.52)
-    #theta = -0.52
+    #theta = 0.52
     if np.abs(theta) < 1e-4:
         R1 = np.eye(3)
     else:
@@ -208,7 +212,7 @@ def sample_rotation_matrix():
         R1, _ = cv2.Rodrigues(r)
     #R1 = np.eye(3)
     theta = uniform(-0.05, 0.05)
-    #theta = 0.09
+    #theta = 0.05
     if np.abs(theta) < 1e-4:
         R2 = np.eye(3)
     else:
@@ -252,10 +256,11 @@ def find_bb(uv, joint_vis, aspect_ratio=1.0):
         h = w * 1.0 / aspect_ratio
     elif w < aspect_ratio * h:
         w = h * aspect_ratio
-    
-    w *= 1.75
-    h *= 1.75
-    
+        
+    w *= cfg.pad_factor
+    h *= cfg.pad_factor
+    w = np.clip(w, 0, cfg.patch_width)
+    h = np.clip(h, 0, cfg.patch_height)
     bbox = [center_x, center_y, w, h]
     return bbox
 
@@ -319,6 +324,7 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
     joint_img[:,0] = uv[:,0]
     joint_img[:,1] = uv[:,1]
     # Root centered
+    z_mean = np.mean(z)
     joint_img[:,2] = np.squeeze(z - z[FreiHandConfig.root_idx])
     
     bbox = find_bb(uv, joint_vis)
@@ -327,6 +333,8 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
     bb_c_y = float(bbox[1])
     bb_width = float(bbox[2])
     bb_height = float(bbox[3])
+    zoom_factor = cfg.patch_width/(bb_width * scale)
+    f = min(K[0,0], K[1,1])
     trans = gen_trans_from_patch_cv(bb_c_x, bb_c_y, bb_width, bb_height, cfg.input_shape[1], cfg.input_shape[0], scale, inv=inv)
     img_patch = cv2.warpPerspective(img2_w, trans, (int(cfg.input_shape[1]), int(cfg.input_shape[0])), flags=cv2.INTER_LINEAR)
     #print("img path before transformation")
@@ -338,7 +346,7 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
     #print("img patch after transformation")
     #print(img_patch.shape)
     #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), cv2.cvtColor(img_patch, cv2.COLOR_RGB2BGR))
-    return img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox
+    return img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean
 
 def rotate_2d(pt_2d, rot_rad):
     x = pt_2d[0]
@@ -347,6 +355,7 @@ def rotate_2d(pt_2d, rot_rad):
     xx = x * cs - y * sn
     yy = x * sn + y * cs
     return np.array([xx, yy], dtype=np.float32)
+    
 
 def gen_trans_from_patch_cv(c_x, c_y, src_width, src_height, dst_width, dst_height, scale, inv=False):
     """
@@ -362,8 +371,10 @@ def gen_trans_from_patch_cv(c_x, c_y, src_width, src_height, dst_width, dst_heig
         True: find a transformation from destination to source
     """
     # augment size with scale
-    src_w = src_width * scale
-    src_h = src_height * scale
+    src_w = np.clip(src_width * scale, 0, cfg.patch_width)
+    src_h = np.clip(src_height * scale, 0, cfg.patch_height)
+    #src_w = src_width * scale
+    #src_h = src_height * scale
     
     src_l = np.array([c_x-src_w*0.5, c_y-src_h*0.5], dtype=np.float32)
     src_r = np.array([c_x-src_w*0.5, c_y+src_h*0.5], dtype=np.float32)
@@ -401,4 +412,75 @@ def trans_point2d(pt_2d, trans):
     src_pt = np.array([pt_2d[0], pt_2d[1], 1.]).T
     dst_pt = np.dot(trans, src_pt)
     return dst_pt[0:2]
+
+
+#===============================================================================
+# def projectPoints(xyz, R, K):
+#     """ Project 3D coordinates into image space. """
+#     xyz = np.array(xyz)
+#     K = np.array(K)
+#     #uv = np.matmul(K, xyz.T).T
+#     xyz_rot = np.matmul(R, xyz.T).T
+#     #===========================================================================
+#     # print("xyz_rot")
+#     # print(xyz_rot)
+#     #===========================================================================
+#     #uv = np.matmul(K, xyz_rot.T).T
+#     #===========================================================================
+#     # print("uv[:, -1:]")
+#     # print(uv[:, -1:])
+#     #===========================================================================
+#     c = []
+#     f = []
+#     c.append(K[0, 2])
+#     c.append(K[1, 2])
+#     f.append(K[0, 0])
+#     f.append(K[1, 1])
+#     x = (xyz_rot[..., 0] / xyz_rot[..., 2]) * f[0] + c[0]
+#     y = (xyz_rot[..., 1] / xyz_rot[..., 2]) * f[1] + c[1]
+#     z = xyz_rot[..., 2]*1000
+#     #print("z")
+#     #print(z)
+#     uv = np.zeros((xyz.shape[0],3))
+#     uv[:, 0] = x
+#     uv[:, 1] = y
+#     uv[:, 2] = z
+#     #===========================================================================
+#     # x1, y1, z1 = pixel2cam(uv, K)
+#     # print("*****")
+#     # print(x1)
+#     # print(y1)
+#     # print(z1)
+#     #===========================================================================
+#     #===========================================================================
+#     # print('uv')
+#     # print(uv)
+#     # print("z")
+#     # print(z)
+#     #===========================================================================
+#     return uv[:,0:2], z, xyz_rot
+# 
+# def pixel2cam(pixel_coord, K):
+#     
+#     c = []
+#     f = []
+#     c.append(K[0, 2])
+#     c.append(K[1, 2])
+#     f.append(K[0, 0])
+#     f.append(K[1, 1])    
+#     pixel_coord[..., 2] = pixel_coord[..., 2]/1000
+#     x = (pixel_coord[..., 0] - c[0]) / f[0] * pixel_coord[..., 2]
+#     y = (pixel_coord[..., 1] - c[1]) / f[1] * pixel_coord[..., 2]
+#     z = pixel_coord[..., 2]
+#     #===========================================================================
+#     # print("=======")
+#     # print("x")
+#     # print(x)
+#     # print('y')
+#     # print(y)
+#     # print("z")
+#     # print(z)    
+#     #===========================================================================
+#     return x,y,z
+#===============================================================================
     

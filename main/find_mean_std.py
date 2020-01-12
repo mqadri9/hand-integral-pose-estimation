@@ -36,7 +36,7 @@ def main():
     sys.path.insert(0, os.path.join(common_dir))
     sys.path.insert(0, os.path.join(main_dir))
     sys.path.insert(0, os.path.join(util_dir))
-    cfg.batch_size = 256
+    cfg.batch_size = 1200
     trainer = Trainer(cfg)
     trainer._make_batch_generator(main_loop=False)
     

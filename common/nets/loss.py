@@ -4,6 +4,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from config import cfg
 from FreiHand_config import FreiHandConfig
+import augment
 
 def _assert_no_grad(tensor):
     assert not tensor.requires_grad, \
@@ -68,7 +69,109 @@ class JointLocationLoss(nn.Module):
         #print(coord_out)
         #print(gt_coord)
         loss = torch.abs(coord_out - gt_coord) * gt_vis
+        #tmp = (coord_out - gt_coord) * gt_vis
+        #loss = tmp ** 2
+        #print(loss.shape)
         if self.size_average:
             return loss.sum() / len(coord_out)
         else:
             return loss.sum()
+        
+        
+class JointLocationLoss2(nn.Module):
+    def __init__(self):
+        super(JointLocationLoss2, self).__init__()
+        self.size_average = True
+
+    def forward(self, heatmap_out, gt_label, gt_vis, joint_cam, center_x, center_y, width, height, scale, R, trans, zoom_factor, z_mean, f, K):
+        
+        joint_num = int(gt_label.shape[1]/3)
+        #print(heatmap_out.shape)
+        hm_width = heatmap_out.shape[-1]
+        hm_height = heatmap_out.shape[-2]
+        hm_depth = heatmap_out.shape[-3] // FreiHandConfig.num_joints
+        coord_out = softmax_integral_tensor(heatmap_out, joint_num, hm_width, hm_height, hm_depth)
+        
+        _assert_no_grad(gt_label)
+        _assert_no_grad(gt_vis)
+        
+        #print(coord_out)
+        #print(gt_coord)
+        #loss = torch.abs(coord_out - gt_coord) * gt_vis
+        coord_out = coord_out.detach().cpu().numpy()
+        label = augment.test_get_joint_loc_res(coord_out)
+        label_gt = augment.test_get_joint_loc_res(gt_label.detach().cpu().numpy())
+        joint_cam = joint_cam.detach().cpu().numpy()
+        center_x = center_x.detach().cpu().numpy()
+        center_y = center_y.detach().cpu().numpy()
+        width = width.detach().cpu().numpy()
+        height = height.detach().cpu().numpy()
+        scale = scale.detach().cpu().numpy()
+        R = R.detach().cpu().numpy()
+        trans = trans.detach().cpu().numpy()
+        trans = np.linalg.inv(trans)
+        zoom_factor = zoom_factor.detach().cpu().numpy()
+        z_mean = z_mean.detach().cpu().numpy()
+        f = f.detach().cpu().numpy()
+        K = K.detach().cpu().numpy()
+        
+        #=======================================================================
+        # print(label_gt[0])
+        # print(augmentation["joint_img3"][0])  
+        #=======================================================================
+        pre_3d_kpt = []
+        for n_sample in range(label.shape[0]):
+            xyz_rot = np.matmul(R[n_sample], joint_cam[n_sample].T).T         
+            tmp = augment.trans_coords_from_patch_to_org_3d(label[n_sample], center_x[n_sample],
+                                                           center_y[n_sample], width[n_sample], height[n_sample], 
+                                                           cfg.patch_width, cfg.patch_height, scale[n_sample], 
+                                                           trans[n_sample], zoom_factor[n_sample], z_mean[n_sample], f[n_sample])
+            tmp2 = augment.trans_coords_from_patch_to_org_3d(label_gt[n_sample], center_x[n_sample],
+                                                            center_y[n_sample], width[n_sample], height[n_sample], 
+                                                            cfg.patch_width, cfg.patch_height, scale[n_sample], 
+                                                            trans[n_sample], zoom_factor[n_sample], z_mean[n_sample], f[n_sample])
+            
+            
+            #===================================================================
+            # print(tmp2)
+            # print(augmentation["joint_img2"][0])  
+            #===================================================================
+            #tmp2 = torch.from_numpy(tmp2)
+            #tmp = torch.from_numpy(tmp)
+            tmp[:,2] = tmp[:,2] + xyz_rot[:,2][9]*1000
+            
+            tmp2[:,2] = tmp2[:,2] + xyz_rot[:,2][9]*1000
+            
+            pre_3d = augment.pixel2cam(tmp, K[n_sample])
+            label_3d_kpt = augment.pixel2cam(tmp2, K[n_sample])
+            Rn = R[n_sample]
+            label_3d_kpt = np.matmul(Rn.T, label_3d_kpt.T).T
+            #label_3d_kpt = torch.matmul(R[n_sample], label_3d_kpt.transpose(1, 0)).transpose(1,0)    
+            pre_3d = np.matmul(Rn.T, pre_3d.T).T
+            #pre_3d = torch.matmul(R[n_sample], pre_3d.transpose(1, 0)).transpose(1,0)
+            pre_3d_kpt.append(pre_3d)
+            #print(label_3d_kpt)
+            #print(joint_cam[n_sample])
+            try:
+                assert np.allclose(label_3d_kpt, joint_cam[n_sample], rtol=1e-6, atol=1e-6)
+            except:
+                print(label_3d_kpt)
+                print(joint_cam[n_sample])
+        pre_3d_kpt = np.array(pre_3d_kpt)
+        loss = []
+        for i in range(pre_3d_kpt.shape[0]):          
+            diff = joint_cam[i] - pre_3d_kpt[i]
+            #euclidean_dist = np.sqrt(np.sum(np.square(diff), axis=1))
+            euclidean_dist = np.sum(np.square(diff), axis=1)
+            loss.append(euclidean_dist)
+        loss = torch.from_numpy(np.array(loss)).cuda()
+        loss.requires_grad = False
+        
+        # print(loss.shape) 32x21
+         #=======================================================================
+        self.size_average = False
+        if self.size_average:
+            return loss.sum() / len(coord_out)
+        else:
+            return loss.sum()
+        #=======================================================================
