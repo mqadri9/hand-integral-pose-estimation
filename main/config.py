@@ -23,7 +23,7 @@ class Config:
     bbox_3d_shape = (300, 300, 300) # depth, height, width
 
     # training config
-    lr_dec_epoch = [80, 160]
+    lr_dec_epoch = [60, 120]
     #lr_dec_epoch = [2, 3, 4]
     # lr_dec_epoch = [80, 90]
     #end_epoch = 20
@@ -38,7 +38,7 @@ class Config:
     test_batch_size = 32
     
     ## model setting
-    resnet_type = 101 #50 # 18, 34, 50, 101, 152
+    resnet_type = 50 # 18, 34, 50, 101, 152
     patch_width = 224
     patch_height = 224
     pad_factor = 1.75

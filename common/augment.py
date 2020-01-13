@@ -95,7 +95,31 @@ def pixel2cam(pixel_coord, K):
     
     return xyz
 
+    
+def load_db_annotation(base_path, data_split=None):
+    if data_split is None:
+        # only training set annotations are released so this is a valid default choice
+        data_split = 'training'
 
+    print('Loading FreiHAND dataset index ...')
+    t = time.time()
+
+    # assumed paths to data containers
+    k_path = os.path.join(base_path, '%s_K.json' % data_split)
+    mano_path = os.path.join(base_path, '%s_mano.json' % data_split)
+    xyz_path = os.path.join(base_path, '%s_xyz.json' % data_split)
+
+    # load if exist
+    K_list = self.json_load(k_path)
+    mano_list = self.json_load(mano_path)
+    xyz_list = self.json_load(xyz_path)
+
+    # should have all the same length
+    assert len(K_list) == len(mano_list), 'Size mismatch.'
+    assert len(K_list) == len(xyz_list), 'Size mismatch.'
+
+    print('Loading of %d samples done in %.2f seconds' % (len(K_list), time.time()-t))
+    return list(zip(K_list, mano_list, xyz_list))
 
 def generate_joint_location_label(patch_width, patch_height, joints, joints_vis):
     #print("=============Inside generate_joint_location_label===========")
