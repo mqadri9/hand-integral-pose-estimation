@@ -18,8 +18,8 @@ class Config:
     result_dir = os.path.join(output_dir, 'result')
     
     input_shape = (224, 224) 
-    output_shape = (input_shape[0]//2, input_shape[1]//2)
-    depth_dim = input_shape[0]//2
+    output_shape = (input_shape[0]//4, input_shape[1]//4)
+    depth_dim = input_shape[0]//4
     bbox_3d_shape = (300, 300, 300) # depth, height, width
 
     # training config
@@ -28,14 +28,14 @@ class Config:
     # lr_dec_epoch = [80, 90]
     #end_epoch = 20
     end_epoch = 400
-    #lr = 1e-3
+    #lr = 1e-3 
     lr = 1e-3
     #lr_dec_factor = 0.5
     lr_dec_factor = 0.1
     optimizer = 'adam'
     weight_decay = 1e-5
     batch_size = 32
-    test_batch_size = 32
+    test_batch_size = 1
     
     ## model setting
     resnet_type = 50 # 18, 34, 50, 101, 152
@@ -46,7 +46,7 @@ class Config:
     num_gpus = 3
     # TODO move the pixel_mean and pixel_std to the Freihand specific config file: FreiHand_config.py?
     pixel_mean = (0.4559, 0.5142, 0.5148)
-    pixel_std = (0.2736, 0.2474, 0.2523)
+    pixel_std = (1, 1, 1) #(0.2736, 0.2474, 0.2523)
     
     num_thread = 20
     

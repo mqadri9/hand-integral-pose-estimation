@@ -204,8 +204,8 @@ def get_aug_config():
     scale_factor = 0.25
     color_factor = 0.2
     
-    #scale = np.clip(np.random.randn(), -1.0, 1.0) * scale_factor + 1.0
-    scale = 1.0
+    scale = np.clip(np.random.randn(), -1.0, 1.0) * scale_factor + 1.0
+    #scale = 1.0
     #rot = np.clip(np.random.randn(), -2.0,
     #              2.0) * rot_factor if random.random() <= 0.6 else 0
     rot = sample_rotation_matrix()
@@ -222,7 +222,7 @@ def sample_rotation_matrix():
     
     # TODO generate a small rotation matrix around an arbitrary vector and multiply them together
     if random.random() <= 0.6:
-        return np.eye(3)    
+        return np.eye(3)
     theta = uniform(-0.52, 0.52)
     #theta = 0.52
     if np.abs(theta) < 1e-4:
@@ -283,8 +283,8 @@ def find_bb(uv, joint_vis, aspect_ratio=1.0):
         
     w *= cfg.pad_factor
     h *= cfg.pad_factor
-    w = np.clip(w, 0, cfg.patch_width)
-    h = np.clip(h, 0, cfg.patch_height)
+    #w = np.clip(w, 0, cfg.patch_width)
+    #h = np.clip(h, 0, cfg.patch_height)
     bbox = [center_x, center_y, w, h]
     return bbox
 
@@ -395,10 +395,10 @@ def gen_trans_from_patch_cv(c_x, c_y, src_width, src_height, dst_width, dst_heig
         True: find a transformation from destination to source
     """
     # augment size with scale
-    src_w = np.clip(src_width * scale, 0, cfg.patch_width)
-    src_h = np.clip(src_height * scale, 0, cfg.patch_height)
-    #src_w = src_width * scale
-    #src_h = src_height * scale
+    #src_w = np.clip(src_width * scale, 0, cfg.patch_width)
+    #src_h = np.clip(src_height * scale, 0, cfg.patch_height)
+    src_w = src_width * scale
+    src_h = src_height * scale
     
     src_l = np.array([c_x-src_w*0.5, c_y-src_h*0.5], dtype=np.float32)
     src_r = np.array([c_x-src_w*0.5, c_y+src_h*0.5], dtype=np.float32)

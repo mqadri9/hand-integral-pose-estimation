@@ -98,24 +98,25 @@ def main():
             loss_sum2 = 0
             tester.test_epoch = epoch
             i = 0
-            for itr, data in enumerate(tqdm(tester.batch_generator)):
+            for itr, (img_patch, label, label_weight, augmentation) in enumerate(tqdm(tester.batch_generator)):
                 i+=1
-                input_img = data["img_patch"]
-                label = data["label"]
-                label_weight = data["label_weight"]
-                center_x = data["augmentation"]["bbox"][0].cuda()
-                center_y = data["augmentation"]["bbox"][1].cuda()
-                width = data["augmentation"]["bbox"][2].cuda()
-                height = data["augmentation"]["bbox"][3].cuda()
-                scale = data["augmentation"]["scale"].cuda()
-                R = data["augmentation"]["R"].cuda()
-                trans = data["augmentation"]["trans"].cuda()
-                zoom_factor = data["augmentation"]["zoom_factor"].cuda()
-                z_mean = data["augmentation"]["z_mean"].cuda()
-                f = data["augmentation"]["f"].cuda()
-                K = data["augmentation"]["K"].cuda()
-                joint_cam = data["augmentation"]["joint_cam"].cuda()
-                heatmap_out = trainer.model(input_img)
+                img_patch = img_patch.cuda()
+                label = label.cuda()
+                label_weight = label_weight.cuda()
+                
+                center_x = augmentation["bbox"][0].cuda()
+                center_y = augmentation["bbox"][1].cuda()
+                width = augmentation["bbox"][2].cuda()
+                height = augmentation["bbox"][3].cuda()
+                scale = augmentation["scale"].cuda()
+                R = augmentation["R"].cuda()
+                trans = augmentation["trans"].cuda()
+                zoom_factor = augmentation["zoom_factor"].cuda()
+                z_mean = augmentation["z_mean"].cuda()
+                f = augmentation["f"].cuda()
+                K = augmentation["K"].cuda()
+                joint_cam = augmentation["joint_cam"].cuda()
+                heatmap_out = trainer.model(img_patch)
                 #if cfg.num_gpus > 1:
                 #    heatmap_out = gather(heatmap_out,0)
                 JointLocationLoss = trainer.JointLocationLoss(heatmap_out, label, label_weight)

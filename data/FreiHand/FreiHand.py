@@ -440,7 +440,7 @@ class FreiHand:
             label_3d_kpt = np.zeros((joint_num,3))
             label_3d_kpt = augment.pixel2cam(_label, K)
             label_3d_kpt = np.matmul(R.T, label_3d_kpt.T).T
-            assert np.allclose(label_3d_kpt, gt_3d_kpt, rtol=1e-10, atol=1e-10)
+            assert np.allclose(label_3d_kpt, gt_3d_kpt, rtol=1e-6, atol=1e-6)
             #pre_3d_kpt = pre_3d_kpt - pre_3d_kpt[self.root_idx]
             #gt_3d_kpt  = gt_3d_kpt - gt_3d_kpt[self.root_idx]
             # rigid alignment for PA MPJPE (protocol #1)
