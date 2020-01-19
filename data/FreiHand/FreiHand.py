@@ -119,7 +119,6 @@ class FreiHand:
         else:
             assert 0, 'Invalid choice.'
     
-    
     def load_db_annotation(self, base_path, data_split=None):
         if data_split is None:
             # only training set annotations are released so this is a valid default choice
@@ -190,6 +189,43 @@ class FreiHand:
         joint_cam = xyz                
         return joint_cam
     
+    def load_evaluation_data(self):
+        if cfg.eval_version == 1:
+            print("Evaluating version 1")
+            data_directory = os.path.join(self.data_dir, "evaluation_v1")
+            img_rgb_path = os.path.join(self.data_dir, "evaluation_v1", 'rgb')
+        else:
+            data_directory = self.data_dir
+            img_rgb_path = os.path.join(self.data_dir, "evaluation", 'rgb')
+        
+        k_path = os.path.join(data_directory, 'evaluation_K.json')
+        scale_path = os.path.join(data_directory, 'evaluation_scale.json')
+        t = time.time()
+        # load if exist
+        K_list = self.json_load(k_path)
+        scale_list = self.json_load(scale_path)
+        
+        imglist = os.listdir(img_rgb_path)
+        lst = [os.path.splitext(x)[0] for x in imglist]
+        lst.sort(key = int)
+        num_images = len(imglist)    
+        # should have all the same length
+        assert len(K_list) == len(scale_list), 'Size mismatch.'
+    
+        print('Loading of %d samples done in %.2f seconds' % (len(K_list), time.time()-t))
+        data = []
+        for i in range(num_images):
+            d = {
+                "K": K_list[i],
+                "bone_length": scale_list[i],
+                "img_path": os.path.join(img_rgb_path, lst[i] + '.jpg')
+            }
+            data.append(d)
+        self.num_samples = num_images
+        print('{} samples read'.format(len(data)))
+        return data
+
+   
     def load_data(self):
         # Need to see if we should train on all versions in the datasplit
         #version = 'gs'
@@ -537,8 +573,141 @@ class FreiHand:
         f_eval_result.write('\n')
         f_eval_result.write(p2_eval_summary)
         f_eval_result.write('\n')
+
+
+    def dump(self, pred_out_path, xyz_pred_list, verts_pred_list):
+        """ Save predictions into a json file. """
+        # make sure its only lists
+        xyz_pred_list = [x.tolist() for x in xyz_pred_list]
+        verts_pred_list = [x.tolist() for x in verts_pred_list]
+    
+        # save to a json
+        with open(pred_out_path, 'w') as fo:
+            json.dump(
+                [
+                    xyz_pred_list,
+                    verts_pred_list
+                ], fo)
+        print('Dumped %d joints and %d verts predictions to %s' % (len(xyz_pred_list), len(verts_pred_list), pred_out_path))
         
+    def estimate_depth(self, bone_length, K, pre_2d_kpt):
+        fx = K[0, 0]
+        fy = K[1, 1]
+        U0 = K[0, 2]
+        V0 = K[1, 2]
         
+        Un = pre_2d_kpt[9, 0]
+        Vn = pre_2d_kpt[9, 1]
+        Zn = pre_2d_kpt[9, 2]
+        Um = pre_2d_kpt[10, 0]
+        Vm = pre_2d_kpt[10, 1]
+        Zm = pre_2d_kpt[10, 2]
+        
+        Unm = (Un - Um) / fx
+        Un0 = (Un - U0) / fx
+        Um0 = (Um - U0) / fx
+        
+        Vnm = (Vn - Vm) / fy
+        Vn0 = (Vn - V0) / fy
+        Vm0 = (Vm - V0) / fy
+        
+        r_A = Unm ** 2 +  Vnm ** 2
+        r_B = Unm * (Un0*Zn - Um0*Zm) + Vnm*(Vn0 * Zn - Vm0 * Zm)
+        r_B*=2
+        r_C = (Un0*Zn  - Um0*Zm)**2 + (Vn0*Zn - Vm0*Zm)**2 + (Zn - Zm) **2 - bone_length**2
+        coeffs = [r_A, r_B, r_C]
+        root = np.roots(coeffs)
+        if np.iscomplexobj(root):
+            print("Complex")
+            print(root)
+            root[0] = np.absolute(root[0])
+            root[1] = np.absolute(root[1])
+            return max(root[0], root[1]), True
+        else:
+            return max(root[0], root[1]), False
+        #np.linalg.norm(pre_2d_kpt[9] - pre_2d_kpt[10], 2) 
+    
+    
+    
+    def evaluate_evaluations(self, preds_in_patch_with_score, params, result_dir):
+        #=======================================================================
+        # print(np.array(params["bone_length"]).shape)
+        # print(np.array(params["K"]).shape)
+        # print(np.array(params["img_path"]).shape)
+        # print(np.array(params["bbox"]).shape)        
+        #=======================================================================
+        preds_in_img_with_score = []
+        for n in range(preds_in_patch_with_score.shape[0]):
+            pred = preds_in_patch_with_score[n]
+            bbox = params["bbox"][n]
+            bone_length = params["bone_length"][n]
+            K = params["K"][n]
+            img_path = params["img_path"][n]
+            center_x = bbox[0, 0]
+            center_y = bbox[0, 1]
+            width = bbox[0, 2]
+            height = bbox[0, 3]
+            trans = augment.gen_trans_from_patch_cv(center_x, center_y, width, height, cfg.input_shape[1], cfg.input_shape[0], 1.0, inv = True)
+            preds_in_img_with_score.append(augment.trans_coords_from_patch_to_org_3d(pred, center_x, center_y, width, height, cfg.patch_width, cfg.patch_height, 1.0, 
+                                           trans, 1.0, 1.0, 1.0))
+            
+        preds_in_img_with_score = np.asarray(preds_in_img_with_score)
+        preds = preds_in_img_with_score[:, :, 0:3]
+        sample_num = preds.shape[0]
+        predictions = []
+        vertices = []
+        for n in range(sample_num):
+            pre_2d_kpt = preds[n].copy()
+            #print(pre_2d_kpt)
+            bone_length = params["bone_length"][n]
+            # convert to mm
+            bone_length *= 1000
+            #print(bone_length)
+            K = params["K"][n]
+            img_path = params["img_path"][n]
+            d, iscomplex = self.estimate_depth(bone_length, K, pre_2d_kpt)
+            print(d)
+            print(pre_2d_kpt)
+            pre_2d_kpt[:,2] = pre_2d_kpt[:,2] + d
+            pre_3d_kpt = np.zeros((21,3))
+            pre_3d_kpt = augment.pixel2cam(pre_2d_kpt, K)
+            verts = np.zeros((778, 3))
+       #========================================================================
+       #      if iscomplex:
+       #          uv1, _, _ = augment.projectPoints(pre_3d_kpt, np.eye(3), K)
+       #          img = cv2.imread(img_path[0], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+       # 
+       #          #print(gt["image"])
+       #          #print(uv1)
+       #          #print(uv2)
+       #          fig = plt.figure()
+       #                 
+       #          ax1 = fig.add_subplot(121)
+       #          ax2 = fig.add_subplot(122)
+       #          # 
+       #          #ax1.imshow((255*img_patch/np.max(img_patch)).astype(np.uint8))
+       #          ax1.imshow(img)
+       #          ax2.imshow(img)
+       #          #ax1.imshow(img2_w)
+       #          # 
+       #          self.plot_hand(ax1, uv1, order='uv')
+       #          self.plot_hand(ax2, uv1, order='uv')
+       #          ax1.axis('off')
+       #          nn = str(random.randint(1,200000))
+       #          plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
+       #          plt.close(fig)
+       #      
+       #========================================================================
+            vertices.append(verts)
+            print(pre_3d_kpt)
+            predictions.append(pre_3d_kpt)
+            sys.exit()
+        np.save("evaluation_predictions", predictions)
+        np.save("vertices", vertices)
+        self.dump('pred.json', predictions, vertices)
+        print("completed")
+            
+      
     def evaluate_kp(self):
         return
 

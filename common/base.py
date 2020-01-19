@@ -172,4 +172,47 @@ class Tester(Base):
 
     def _evaluate(self, preds, label_list, augmentation_list, result_save_path):
         self.testset.evaluate(preds, label_list, augmentation_list,  result_save_path)
+
+
+class Evaluator(Base):
+
+    def __init__(self, cfg, evaluation_epoch):
+        self.evaluation_epoch = int(evaluation_epoch)
+        super(Evaluator, self).__init__(cfg, log_name = 'evaluate_logs.txt')
+
+    def _make_batch_generator(self):
+        # data load and construct batch generator
+        self.logger.info("Creating dataset...")
+        evaluationset = eval(self.cfg.testset)("evaluation")
+        evaluationset_loader = DatasetLoader(evaluationset, 
+                                             False, 
+                                             transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=cfg.pixel_mean, std=cfg.pixel_std)]),
+                                             is_eval=True)
+        batch_generator = DataLoader(dataset=evaluationset_loader, batch_size=self.cfg.num_gpus*self.cfg.eval_batch_size, shuffle=False, num_workers=self.cfg.num_thread, pin_memory=True)
         
+        self.evaluationset = evaluationset
+        self.joint_num = evaluationset_loader.joint_num
+        self.skeleton = evaluationset_loader.skeleton
+        self.tot_sample_num = evaluationset_loader.__len__()
+        self.batch_generator = batch_generator
+        self.num_samples = evaluationset.num_samples
+        print("Number of evaluation samples is {}".format(self.num_samples))
+    
+    def _make_model(self):
+        model_path = os.path.join(self.cfg.model_dir, 'snapshot_%d.pth.tar' % self.evaluation_epoch)
+        assert os.path.exists(model_path), 'Cannot find model at ' + model_path
+        self.logger.info('Load checkpoint from {}'.format(model_path))
+        
+        # prepare network
+        self.logger.info("Creating graph...")
+        model = get_pose_net(self.cfg, False, self.joint_num)
+        model = DataParallelModel(model).cuda()
+        ckpt = torch.load(model_path)
+        model.load_state_dict(ckpt['network'])
+        model.eval()
+        self.model = model
+
+    def _evaluate(self, preds, params, result_save_path):
+        self.evaluationset.evaluate_evaluations(preds, params, result_save_path)
+        
+    

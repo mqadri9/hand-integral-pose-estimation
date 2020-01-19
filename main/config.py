@@ -16,6 +16,8 @@ class Config:
     vis_dir = os.path.join(output_dir, 'vis')
     log_dir = os.path.join(output_dir, 'log')
     result_dir = os.path.join(output_dir, 'result')
+    eval_result_dir = os.path.join(output_dir, 'result', 'evaluation')
+    lib_dir = os.path.join(root_dir, 'lib')
     
     input_shape = (224, 224) 
     output_shape = (input_shape[0]//4, input_shape[1]//4)
@@ -35,8 +37,9 @@ class Config:
     optimizer = 'adam'
     weight_decay = 1e-5
     batch_size = 32
-    test_batch_size = 1
-    
+    test_batch_size = 32
+    eval_batch_size = 1
+    eval_version = 2
     ## model setting
     resnet_type = 50 # 18, 34, 50, 101, 152
     patch_width = 224
@@ -48,7 +51,12 @@ class Config:
     pixel_mean = (0.4559, 0.5142, 0.5148)
     pixel_std = (1, 1, 1) #(0.2736, 0.2474, 0.2523)
     
-    num_thread = 20
+    num_thread = 1
+    
+    use_hand_detector = False
+    checksession = 1
+    checkepoch = 2
+    checkpoint = 239999
     
     
     continue_train = False
@@ -64,6 +72,7 @@ class Config:
 cfg = Config()
 
 sys.path.insert(0, os.path.join(cfg.root_dir, 'common'))
+sys.path.insert(0, os.path.join(cfg.root_dir, 'lib'))
 from utils.dir_utils import add_pypath, make_folder
 add_pypath(os.path.join(cfg.data_dir))
 add_pypath(os.path.join(cfg.common_dir))
@@ -74,3 +83,4 @@ make_folder(cfg.model_dir)
 make_folder(cfg.vis_dir)
 make_folder(cfg.log_dir)
 make_folder(cfg.result_dir)
+make_folder(cfg.eval_result_dir)
