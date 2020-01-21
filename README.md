@@ -1,1 +1,1 @@
-# hand-integral-pose-estimation
+# Pose Regression and Procrustes Analysis Network integration
