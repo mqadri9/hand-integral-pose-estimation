@@ -11,7 +11,8 @@ import numpy as np
 def parse_args():
 	parser = argparse.ArgumentParser()
 	add_train_args(parser)		
-	parser.add_argument('--pts_num', type=int, default=21, help='number of keypoints in each sample')
+	# parser.add_argument('--pts_num', type=int, default=21, help='number of keypoints in each sample')
+	parser.add_argument('--regressor_output', type=str, help='regressor output npy file')
 	args = parser.parse_args()
 	return args
 
@@ -91,14 +92,14 @@ def PANet_reconstruction(regressor_output):
 
 	return pts_recon_PANet, loss_mpjpe
 
-# if __name__ == '__main__':
-# 	### Replace the line below with the reconstructed pts from regressor ###
-# 	regressor_output = np.load('local_data/hand_test.npy')
-# 	out_pts, loss_mpjpe = PANet_reconstruction(regressor_output)
-	
-# 	# loss_mpjpe = computeMPJPE(out_pts, regressor_output)	
-# 	print("Shape of output: ", out_pts.shape)
-# 	print("MPJPE loss of pred: ", loss_mpjpe)
+if __name__ == '__main__':
+	### Replace the line below with the reconstructed pts from regressor ###
+	args = parse_args()
+	regressor_output = np.load(args.regressor_output)
+	out_pts, loss_mpjpe = PANet_reconstruction(regressor_output)
+
+	print("Shape of output: ", out_pts.shape)
+	print("MPJPE loss of pred: ", loss_mpjpe)
 
 
 
