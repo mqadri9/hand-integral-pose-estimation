@@ -9,6 +9,7 @@ import cv2
 import matplotlib.pyplot as plt
 import augment
 from config import cfg
+from hand_detector import HandDetector
 plt.switch_backend('agg')
 
 class FreiHand:
@@ -19,7 +20,7 @@ class FreiHand:
     
     def __init__(self, data_split="training"):
         self.data_split = data_split
-        #self.data_split = "training"
+        self.data_split = "training"
         self.data_dir = os.path.join('..', 'data', 'FreiHand')
         #if data_split == "training":
         #    self.data_dir = os.path.join('..', 'data', 'FreiHand', 'training', 'rgb')
@@ -32,7 +33,12 @@ class FreiHand:
         self.eval_joint = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
         self.root_idx = 9
         self.size_db = 32560
-
+        if cfg.use_hand_detector:
+            self.hand_detector = HandDetector(cfg.checksession, cfg.checkepoch, cfg.checkpoint, cuda=True, thresh=0.001)
+            self.hand_detector.load_faster_rcnn_detector()
+        else:
+            self.hand_detector = None
+    
     def _assert_exist(self, p):
         msg = 'File does not exists: %s' % p
         assert os.path.exists(p), msg
@@ -76,9 +82,63 @@ class FreiHand:
         for i in range(21):
             if vis[i] > 0.5:
                 axis.plot(coords_hw[i, 1], coords_hw[i, 0], 'o', color=colors[i, :])
-
-
     
+    def estimate_depth(self, bone_length, K, pre_2d_kpt, p = False):
+        fx = K[0, 0]
+        fy = K[1, 1]
+        U0 = K[0, 2]
+        V0 = K[1, 2]
+        
+        Un = pre_2d_kpt[9, 0]
+        Vn = pre_2d_kpt[9, 1]
+        Zn = pre_2d_kpt[9, 2]
+        Um = pre_2d_kpt[10, 0]
+        Vm = pre_2d_kpt[10, 1]
+        Zm = pre_2d_kpt[10, 2]
+        
+        Unm = (Un - Um) / fx
+        Un0 = (Un - U0) / fx
+        Um0 = (Um - U0) / fx
+        
+        Vnm = (Vn - Vm) / fy
+        Vn0 = (Vn - V0) / fy
+        Vm0 = (Vm - V0) / fy
+        
+        #=======================================================================
+        # Unm = round(Unm,4)
+        # Un0 = round(Un0,4)
+        # Um0 = round(Um0,4)
+        # Vnm = round(Vnm,4)
+        # Vn0 = round(Vn0,4)
+        # Vm0 = round(Vm0,4)
+        # Zm = round(Vm0,4)
+        # Zn = round(Vm0,4)
+        #=======================================================================
+        
+        r_A = Unm ** 2 +  Vnm ** 2
+        r_B = Unm * (Un0*Zn - Um0*Zm) + Vnm*(Vn0 * Zn - Vm0 * Zm)
+        r_B*=2
+        r_C = (Un0*Zn  - Um0*Zm)**2 + (Vn0*Zn - Vm0*Zm)**2 + (Zn - Zm) **2 - bone_length**2
+
+        if p:
+            print(Un)
+            print(Um)
+            print(Vn)
+            print(Vm)
+            print(Zm)
+            print(Zn)
+            print(bone_length)
+        
+        coeffs = [r_A, r_B, r_C]
+        root = np.roots(coeffs)
+        if np.iscomplexobj(root):
+            #print("Complex")
+            #print(root)
+            return max(np.absolute(root[0]), np.absolute(root[1])), True
+        else:
+            return max(root[0], root[1]), False
+        #np.linalg.norm(pre_2d_kpt[9] - pre_2d_kpt[10], 2) 
+        
     # Since we need labelled evaluation data, 
     # need to figure out a way to split the training data into training and evaluation
     def _sample_dataset(self, data_split):
@@ -111,14 +171,44 @@ class FreiHand:
         """ Hardcoded size of the datasets. """
         if data_split == 'training':
             #return 32560  # number of unique samples (they exists in multiple 'versions')
-            return 30000
+            #return 30000
+            return 32550
         elif data_split == "testing":
-            return 2560
+            #return 2560
+            return 10
         elif data_split == 'evaluation':
             return 3960
         else:
             assert 0, 'Invalid choice.'
+
+    def load_db_annotation_complete(self, base_path, data_split=None):
+        if data_split is None:
+            # only training set annotations are released so this is a valid default choice
+            data_split = 'training'
     
+        print('Loading FreiHAND dataset index ...')
+        t = time.time()
+    
+        # assumed paths to data containers
+        k_path = os.path.join(base_path, '%s_K.json' % data_split)
+        mano_path = os.path.join(base_path, '%s_mano.json' % data_split)
+        xyz_path = os.path.join(base_path, '%s_xyz.json' % data_split)
+        ref_bone_path = os.path.join(base_path, '%s_scale.json' % data_split)
+        
+        # load if exist
+        K_list = self.json_load(k_path)
+        mano_list = self.json_load(mano_path)
+        xyz_list = self.json_load(xyz_path)
+        ref_bone_list = self.json_load(ref_bone_path)
+    
+        # should have all the same length
+        assert len(K_list) == len(mano_list), 'Size mismatch.'
+        assert len(K_list) == len(xyz_list), 'Size mismatch.'
+    
+        print('Loading of %d samples done in %.2f seconds' % (len(K_list), time.time()-t))
+        return list(zip(K_list, mano_list, xyz_list, ref_bone_list))
+
+   
     def load_db_annotation(self, base_path, data_split=None):
         if data_split is None:
             # only training set annotations are released so this is a valid default choice
@@ -131,18 +221,20 @@ class FreiHand:
         k_path = os.path.join(base_path, '%s_K.json' % data_split)
         mano_path = os.path.join(base_path, '%s_mano.json' % data_split)
         xyz_path = os.path.join(base_path, '%s_xyz.json' % data_split)
-    
+        ref_bone_path = os.path.join(base_path, '%s_scale.json' % data_split)
+        
         # load if exist
         K_list = self.json_load(k_path)
         mano_list = self.json_load(mano_path)
         xyz_list = self.json_load(xyz_path)
-    
+        ref_bone_list = self.json_load(ref_bone_path)
         # should have all the same length
         assert len(K_list) == len(mano_list), 'Size mismatch.'
         assert len(K_list) == len(xyz_list), 'Size mismatch.'
+        assert len(K_list) == len(ref_bone_list), 'Size mismatch.'
     
         print('Loading of %d samples done in %.2f seconds' % (len(K_list), time.time()-t))
-        return list(zip(K_list, mano_list, xyz_list))
+        return list(zip(K_list, mano_list, xyz_list, ref_bone_list))
     
     def projectPoints(self, xyz, R, K, p=False):
         """ Project 3D coordinates into image space. """
@@ -193,11 +285,26 @@ class FreiHand:
         if cfg.eval_version == 1:
             print("Evaluating version 1")
             data_directory = os.path.join(self.data_dir, "evaluation_v1")
+            save_directory = data_directory
             img_rgb_path = os.path.join(self.data_dir, "evaluation_v1", 'rgb')
         else:
             data_directory = self.data_dir
+            save_directory = os.path.join(self.data_dir, "evaluation")
             img_rgb_path = os.path.join(self.data_dir, "evaluation", 'rgb')
-        
+
+        cache_file = '{}_keypoint_bbox_db_{}.pkl'.format(self.name, "evaluation")
+        cache_file = os.path.join(save_directory, cache_file)
+        db = None
+        if os.path.exists(cache_file):
+            with open(cache_file, 'rb') as fid:
+                db = pk.load(fid)
+            print('{} gt db loaded from {}, {} samples are loaded'.format(self.name, cache_file, len(db)))
+    
+        if db != None:
+            self.num_samples = len(db)
+            return db
+
+   
         k_path = os.path.join(data_directory, 'evaluation_K.json')
         scale_path = os.path.join(data_directory, 'evaluation_scale.json')
         t = time.time()
@@ -215,12 +322,18 @@ class FreiHand:
         print('Loading of %d samples done in %.2f seconds' % (len(K_list), time.time()-t))
         data = []
         for i in range(num_images):
+            img_path = os.path.join(img_rgb_path, lst[i] + '.jpg')
+            bbox = augment.find_bb_hand_detector(img_path, self.hand_detector)
             d = {
                 "K": K_list[i],
                 "bone_length": scale_list[i],
-                "img_path": os.path.join(img_rgb_path, lst[i] + '.jpg')
+                "img_path": os.path.join(img_rgb_path, lst[i] + '.jpg'),
+                "bbox": bbox
             }
             data.append(d)
+        with open(cache_file, 'wb') as fid:
+            pk.dump(data, fid, pk.HIGHEST_PROTOCOL)
+        print('{} samples read wrote {}'.format(len(data), cache_file))
         self.num_samples = num_images
         print('{} samples read'.format(len(data)))
         return data
@@ -268,8 +381,11 @@ class FreiHand:
                 img, img_path = self.read_img(idx, self.data_dir, d_s, version)
                 msk = self.read_msk(idx, self.data_dir)
                 # annotation for this frame
-                K, mano, xyz = db_data_anno[idx]
-                K, mano, xyz = [np.array(x) for x in [K, mano, xyz]]
+                K, mano, xyz, ref_bone_len = db_data_anno[idx]
+                K, mano, xyz, ref_bone_len = [np.array(x) for x in [K, mano, xyz, ref_bone_len]]
+                bbox = augment.find_bb_hand_detector(img_path, self.hand_detector)
+                #print(bbox)
+                #print("====")
                 # right now assume all points are visible . However, we can modify the
                 # db_data_annot to return the visibility for each sample
                 # can create a training_visiblity.json that we can read
@@ -298,7 +414,9 @@ class FreiHand:
                     'joint_cam': joint_cam, # [X, Y, Z] in camera coordinate
                     'K': K,
                     'version': version,
-                    "idx": idx
+                    "idx": idx,
+                    "ref_bone_len": ref_bone_len,
+                    "faster_rccn_bbox": bbox
                 })
             
         with open(cache_file, 'wb') as fid:
@@ -307,15 +425,21 @@ class FreiHand:
         self.num_samples = len(data)
         return data
     
-    def gen_test_data(self, augmentation_list):
+    def gen_test_data(self, params_list):
         #data = self.load_data()
-        len_gts = len(augmentation_list["img_path"])
+        len_gts = len(params_list["img_path"])
         gts = []
         for i in range(len_gts):
-            K = augmentation_list['K'][i]
-            joint_cam = augmentation_list["joint_cam"][i]
-            R = augmentation_list["R"][i]
-            scale = augmentation_list["scale"][i]
+            K = params_list['K'][i]
+            joint_cam = params_list["joint_cam"][i]
+            R = params_list["R"][i]
+            scale = params_list["scale"][i]
+            ref_bone_len = params_list["ref_bone_len"][i]
+            center_x = params_list["center_x"][i]
+            center_y = params_list["center_y"][i]
+            width = params_list["width"][i]
+            height = params_list["height"][i]
+            img_path = params_list['img_path'][i]
             #cvimg = cv2.imread(d['img_path'], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
             #===================================================================
             # print(R)
@@ -325,69 +449,93 @@ class FreiHand:
             #                                                                                                      aspect_ratio=1.0, inv=False)
             #===================================================================
             
-            img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean = augment.generate_patch_image(augmentation_list["cvimg"][i], 
-                                                                                                                                         joint_cam, 
-                                                                                                                                         scale, R, K, 
-                                                                                                                                         aspect_ratio=1.0, inv=True)
+            img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, _, zoom_factor, f, z_mean = augment.generate_patch_image(params_list["cvimg"][i], 
+                                                                                                                                      joint_cam, 
+                                                                                                                                      scale, R, K, 
+                                                                                                                                      aspect_ratio=1.0, inv=True, 
+                                                                                                                                      hand_detector=self.hand_detector,
+                                                                                                                                      img_path=img_path,
+                                                                                                                                      return_bbox=True,
+                                                                                                                                      faster_rcnn_bbox = np.array([center_x, center_y, width, height]))
             #===================================================================
             # print(trans1)
             # print(trans)
             # print(np.linalg.inv(trans))
             #===================================================================
             data = {
-                'image': augmentation_list['img_path'][i],
-                'center_x': bbox[0],
-                'center_y': bbox[1],
-                'width': bbox[2],
-                'height': bbox[3],
+                'image': img_path,
+                'center_x': center_x,
+                'center_y': center_y,
+                'width': width,
+                'height': height,
+                'bbox': np.array([center_x, center_y, width, height]),
                 'joints_3d': joint_img_orig, # [org_img_x, org_img_y, depth - root_depth]
                 'joints_3d_vis': joint_vis,
                 'joints_3d_cam': joint_cam, # [X, Y, Z] in camera coordinate
                 'K': K,
                 'R': R,
                 'trans': trans,
-                'cvimg': augmentation_list["cvimg"][i],
+                'cvimg': params_list["cvimg"][i],
                 'scale': scale,
                 'z_mean': z_mean,
                 'f': f,
-                'zoom_factor': zoom_factor
+                'zoom_factor': zoom_factor,
+                "ref_bone_len": ref_bone_len,
+                'img_path': img_path
             }
             gts.append(data)
         return gts
     
-    def test_verify_identity(self, n, gt_3d_kpt, gts, joints_3d):
+    def test_verify_identity(self, n, gt_3d_kpt, gts):
         #=======================================================================
-        # joint_vis = np.ones(joints_3d.shape, dtype=np.float)
+        joint_vis = np.ones(gt_3d_kpt.shape, dtype=np.float)
+        cvimg = gts[n]['cvimg']
         # # Augment
         # #print("===================================")
         # #print(gt_3d_kpt)
         gt_3d_kpt_save = np.copy(gt_3d_kpt)
-        # xyz_rot = np.matmul(gts[n]["R"], gt_3d_kpt.T).T
-        # scale = gts[n]["scale"]
-        # img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean = augment.generate_patch_image(gts[n]["cvimg"], 
-        #                                                                                                                              gt_3d_kpt, 
-        #                                                                                                                              scale, 
-        #                                                                                                                              gts[n]["R"], 
-        #                                                                                                                              gts[n]["K"])
-        # joint_img_sav_1 = np.copy(joint_img)
-        # for n_jt in range(len(joint_img)):
-        #     joint_img[n_jt, 0:2] = augment.trans_point2d(joint_img[n_jt, 0:2], trans)
-        # 
+        joint_cam = np.copy(gt_3d_kpt)
+        xyz_rot = np.matmul(gts[n]["R"], gt_3d_kpt.T).T
+        scale = gts[n]["scale"]
+        R = gts[n]['R']
+        K = gts[n]['K']
+        if cfg.use_hand_detector:
+            img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False, 
+                                                                                                                                         hand_detector=self.hand_detector, 
+                                                                                                                                         img_path=gts[n]['img_path'],
+                                                                                                                                         faster_rcnn_bbox=gts[n]["bbox"])
+
+        else:
+            img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False)
+        joint_img_sav_1 = np.copy(joint_img)
+        for n_jt in range(len(joint_img)):
+            joint_img[n_jt, 0:2] = augment.trans_point2d(joint_img[n_jt, 0:2], trans)
+        #=======================================================================
+        # print("======")
+        # print(gts[n]["bbox"])
+        # print(gts[n]["center_x"])      
+        # print(gts[n]["center_y"]) 
+        # print(gts[n]["width"]) 
+        # print(gts[n]["height"]) 
+        #=======================================================================
         # #=======================================================================
-        # # for n_jt in range(len(joint_img)):
-        # #     # TODO divide by rect_3d_width
-        # #     zoom_factor = max(bbox[3], bbox[2])
-        # #     joint_img[n_jt, 2] = joint_img[n_jt, 2] / (zoom_factor * scale) * cfg.patch_width
+        #print(joint_img)
+        for n_jt in range(len(joint_img)):
+            # TODO divide by rect_3d_width
+            zoom_factor = max(bbox[3], bbox[2])
+            joint_img[n_jt, 2] = joint_img[n_jt, 2] / (zoom_factor * scale) * cfg.patch_width
         # #=======================================================================
         #     #joint_img[n_jt, 2] = joint_img[n_jt, 2] / (cfg.bbox_3d_shape[0] * scale) * cfg.patch_width
         # 
+        #=======================================================================
         # for n_jt in range(len(joint_img)):
         #     # TODO divide by rect_3d_width
-        #     #zoom_factor = max(bbox[3], bbox[2])
+        #     zoom_factor = max(bbox[3], bbox[2])
         #     joint_img[n_jt, 2] = (joint_img[n_jt, 2] * f * zoom_factor) / (z_mean * cfg.patch_width)
+        #=======================================================================
         # 
-        # joint_img_sav_2 = np.copy(joint_img)
-        # label, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)
+        joint_img_sav_2 = np.copy(joint_img)
+        label, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)
         #=======================================================================
         
         # UnAugment
@@ -396,17 +544,26 @@ class FreiHand:
         label[:, 0] = (label[:, 0] + 0.5) * cfg.patch_width
         label[:, 1] = (label[:, 1] + 0.5) * cfg.patch_height
         label[:, 2] = label[:, 2] * cfg.patch_width
-        
         assert np.allclose(label, joint_img_sav_2, rtol=1e-10, atol=1e-10)
         # add score to last dimension
-                
+        #=======================================================================
+        #print(gts[n]['trans'])
+        #print(trans)
+        #print(np.linalg.inv(trans))
+        # print("=-=======")
+        # print(gts[n]["bbox"])
+        # print([gts[n]['center_x'], gts[n]['center_y'],  gts[n]['width'], gts[n]['height']])
+        #=======================================================================
         pre_2d_kpt = augment.trans_coords_from_patch_to_org_3d(label, gts[n]['center_x'],
                                                                gts[n]['center_y'], gts[n]['width'],
                                                                gts[n]['height'], cfg.patch_width, 
                                                                cfg.patch_height, scale, gts[n]['trans'], 
                                                                gts[n]['zoom_factor'], gts[n]['z_mean'], gts[n]['f'])
-        
-        assert np.allclose(pre_2d_kpt, joint_img_sav_1, rtol=1e-10, atol=1e-10)
+        #=======================================================================
+        #print(pre_2d_kpt)
+        #print(joint_img_sav_1)
+        #=======================================================================
+        assert np.allclose(pre_2d_kpt, joint_img_sav_1, rtol=1e-6, atol=1e-6)
         
         
         pre_2d_kpt[:,2] = pre_2d_kpt[:,2] + xyz_rot[:,2][9]*1000
@@ -416,14 +573,25 @@ class FreiHand:
         
         #print(pre_3d_kpt)
         #print(gt_3d_kpt_save)
-        assert np.allclose(pre_3d_kpt, gt_3d_kpt_save, rtol=1e-10, atol=1e-10)
+        assert np.allclose(pre_3d_kpt, gt_3d_kpt_save, rtol=1e-6, atol=1e-6)
+
+
+    def calculate_bone_length(self, xyz):
+        xyz = np.array(xyz)
+        Xn = xyz[9, 0]
+        Yn = xyz[9, 1]
+        Zn = xyz[9, 2]
+        Xm = xyz[10, 0]
+        Ym = xyz[10, 1]
+        Zm = xyz[10, 2]
+        return np.sqrt((Xn - Xm)**2 + (Yn - Ym)**2 + (Zn - Zm)**2)
           
-    def evaluate(self, preds_in_patch_with_score, label_list, augmentation_list, result_dir):
+    def evaluate(self, preds_in_patch_with_score, label_list, params_list, result_dir):
         
         print() 
         print('Evaluation start...')
         
-        gts = self.gen_test_data(augmentation_list)
+        gts = self.gen_test_data(params_list)
         
         print("len gts is {}".format(len(gts)))
         # From patch to original image coordinate system
@@ -460,15 +628,40 @@ class FreiHand:
             gt = gts[n]
             R = gt["R"]
             K = gt['K']
+            #print(gt['center_x'], gt['center_y'], gt['width'], gt['height'])
             gt_3d_kpt = gt['joints_3d_cam']
+            ref_bone_len = gt["ref_bone_len"]
             xyz_rot = np.matmul(R, gt_3d_kpt.T).T
             gt_vis = gt['joints_3d_vis'].copy()
-            #self.test_verify_identity(n, gt_3d_kpt, gts, gt['label'])
+            self.test_verify_identity(n, gt_3d_kpt, gts)
             pre_2d_kpt = preds[n].copy()
+            #pre_2d_kpt[:,2] = pre_2d_kpt[:,2] - pre_2d_kpt[:,2][9] 
+            d, iscomplex = self.estimate_depth(ref_bone_len*1000, K, pre_2d_kpt)
+            #print(d)
+            #print(xyz_rot[:,2][9]*1000)
+            #print("=========-")
             _label = label_in_img_with_score[n].copy()
             #print(pre_2d_kpt)
             #pre_2d_kpt[:,2] = np.squeeze(pre_2d_kpt[:,2] - pre_2d_kpt[:,2][FreiHandConfig.root_idx])
-            pre_2d_kpt[:,2] = pre_2d_kpt[:,2] + xyz_rot[:,2][9]*1000
+            #if np.abs(d-xyz_rot[:,2][9]*1000) > 300:
+            #    print("=================")
+            #    d1, iscomplex = self.estimate_depth(ref_bone_len*1000, K, _label, p=True)
+            #    print("----")
+            #    d, iscomplex = self.estimate_depth(ref_bone_len*1000, K, pre_2d_kpt, p=True)
+            #    print("----")
+                #print(ref_bone_len*1000)
+                #print(self.calculate_bone_length(xyz_rot))
+            #    print(np.abs(d-xyz_rot[:,2][9]*1000))
+            #    print(np.abs(d1-xyz_rot[:,2][9]*1000))
+                #print(pre_2d_kpt)
+                #print(_label)
+            pre_2d_kpt[:,2] = pre_2d_kpt[:,2] + d#xyz_rot[:,2][9]*1000
+
+            #if np.abs(d-xyz_rot[:,2][9]*1000) > 30:
+            #    continue
+            #print(xyz_rot[:,2][9]*1000)
+            #print(pre_2d_kpt[:,2] - d)
+            #print((gt_3d_kpt[:,2] - gt_3d_kpt[:,2][9])*1000)
             _label[:,2] = _label[:,2] + xyz_rot[:,2][9]*1000
             pre_3d_kpt = np.zeros((joint_num,3))
             pre_3d_kpt = augment.pixel2cam(pre_2d_kpt, K)
@@ -476,7 +669,7 @@ class FreiHand:
             label_3d_kpt = np.zeros((joint_num,3))
             label_3d_kpt = augment.pixel2cam(_label, K)
             label_3d_kpt = np.matmul(R.T, label_3d_kpt.T).T
-            assert np.allclose(label_3d_kpt, gt_3d_kpt, rtol=1e-6, atol=1e-6)
+            #assert np.allclose(label_3d_kpt, gt_3d_kpt, rtol=1e-6, atol=1e-6)
             #pre_3d_kpt = pre_3d_kpt - pre_3d_kpt[self.root_idx]
             #gt_3d_kpt  = gt_3d_kpt - gt_3d_kpt[self.root_idx]
             # rigid alignment for PA MPJPE (protocol #1)
@@ -589,45 +782,6 @@ class FreiHand:
                     verts_pred_list
                 ], fo)
         print('Dumped %d joints and %d verts predictions to %s' % (len(xyz_pred_list), len(verts_pred_list), pred_out_path))
-        
-    def estimate_depth(self, bone_length, K, pre_2d_kpt):
-        fx = K[0, 0]
-        fy = K[1, 1]
-        U0 = K[0, 2]
-        V0 = K[1, 2]
-        
-        Un = pre_2d_kpt[9, 0]
-        Vn = pre_2d_kpt[9, 1]
-        Zn = pre_2d_kpt[9, 2]
-        Um = pre_2d_kpt[10, 0]
-        Vm = pre_2d_kpt[10, 1]
-        Zm = pre_2d_kpt[10, 2]
-        
-        Unm = (Un - Um) / fx
-        Un0 = (Un - U0) / fx
-        Um0 = (Um - U0) / fx
-        
-        Vnm = (Vn - Vm) / fy
-        Vn0 = (Vn - V0) / fy
-        Vm0 = (Vm - V0) / fy
-        
-        r_A = Unm ** 2 +  Vnm ** 2
-        r_B = Unm * (Un0*Zn - Um0*Zm) + Vnm*(Vn0 * Zn - Vm0 * Zm)
-        r_B*=2
-        r_C = (Un0*Zn  - Um0*Zm)**2 + (Vn0*Zn - Vm0*Zm)**2 + (Zn - Zm) **2 - bone_length**2
-        coeffs = [r_A, r_B, r_C]
-        root = np.roots(coeffs)
-        if np.iscomplexobj(root):
-            print("Complex")
-            print(root)
-            root[0] = np.absolute(root[0])
-            root[1] = np.absolute(root[1])
-            return max(root[0], root[1]), True
-        else:
-            return max(root[0], root[1]), False
-        #np.linalg.norm(pre_2d_kpt[9] - pre_2d_kpt[10], 2) 
-    
-    
     
     def evaluate_evaluations(self, preds_in_patch_with_score, params, result_dir):
         #=======================================================================
@@ -666,7 +820,8 @@ class FreiHand:
             K = params["K"][n]
             img_path = params["img_path"][n]
             d, iscomplex = self.estimate_depth(bone_length, K, pre_2d_kpt)
-            print(d)
+            if iscomplex:
+                print(d)
             print(pre_2d_kpt)
             pre_2d_kpt[:,2] = pre_2d_kpt[:,2] + d
             pre_3d_kpt = np.zeros((21,3))

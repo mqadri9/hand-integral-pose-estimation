@@ -82,6 +82,7 @@ class DatasetLoader(Dataset):
             
             K = data['K']
             joint_cam = data["joint_cam"]
+            faster_rcnn_bbox = data['faster_rccn_bbox']
             # 1. load image
             cvimg = cv2.imread(data['img_path'], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
             if not self.main_loop:
@@ -97,13 +98,20 @@ class DatasetLoader(Dataset):
                 #scale, rot, color_scale = 1.0, 0, [1.0, 1.0, 1.0]
             else:
                 scale, R, color_scale = 1.0, np.eye(3), [1.0, 1.0, 1.0]
-            img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean = augment.generate_patch_image(cvimg, joint_cam, scale, R, K)
-    
+            
+            if cfg.use_hand_detector:
+                img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False, 
+                                                                                                                                             hand_detector=self.hand_detector, 
+                                                                                                                                             img_path=data['img_path'],
+                                                                                                                                             faster_rcnn_bbox=faster_rcnn_bbox)
+            else:
+                img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False)
+            
             # 4. generate patch joint ground truth        
             for n_jt in range(len(joint_img)):
                 joint_img[n_jt, 0:2] = augment.trans_point2d(joint_img[n_jt, 0:2], trans)
-    
-            augmentation = {
+
+            params = {
                 "R": R,
                 "cvimg": cvimg,
                 "K": K,
@@ -116,9 +124,28 @@ class DatasetLoader(Dataset):
                 "bbox": bbox,
                 "trans": trans,
                 "joint_img_sav": np.copy(joint_img),
-                "joint_img_orig": joint_img_orig
+                "joint_img_orig": joint_img_orig,
+                "ref_bone_len": data["ref_bone_len"]
             }
-             
+            #===================================================================
+            # fig = plt.figure()
+            #          
+            # ax1 = fig.add_subplot(121)
+            # ax2 = fig.add_subplot(122)
+            # # 
+            # ax1.imshow((255*img_patch/np.max(img_patch)).astype(np.uint8))
+            # ax2.imshow(cvimg)
+            # #ax1.imshow(img2_w)
+            # # 
+            # FreiHand.plot_hand(ax1, joint_img[:, 0:2], order='uv')
+            # FreiHand.plot_hand(ax2, joint_img_orig[:, 0:2], order='uv')
+            # ax1.axis('off')
+            # nn = str(random.randint(1,3000))
+            # #print("=============================================================")
+            # #print(nn)
+            # plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn)) 
+            #===================================================================
+            
             img_patch = self.transform(img_patch)
             # apply normalization
             for n_c in range(img_channels):
@@ -129,49 +156,25 @@ class DatasetLoader(Dataset):
                 #joint_img[n_jt, 2] = (joint_img[n_jt, 2] * f * zoom_factor) / (z_mean * cfg.patch_width)
                 joint_img[n_jt, 2] = joint_img[n_jt, 2] / (zoom_factor * scale) * cfg.patch_width
                 #joint_img[n_jt, 2] = joint_img[n_jt, 2] / (cfg.bbox_3d_shape[0] * scale) * cfg.patch_width
-            
     
             label, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)
             if self.is_train:
-                return img_patch, label, label_weight, augmentation
+                return img_patch, label, label_weight, params
             else:
-                return img_patch, label, label_weight, augmentation
+                return img_patch, label, label_weight, params
         else:
             cvimg = cv2.imread(data['img_path'], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
             #nn = str(random.randint(4000,5000))
             #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), cv2.cvtColor(cvimg, cv2.COLOR_RGB2BGR))
-            #try:            
-            bboxes = self.hand_detector.detect(data["img_path"])
-            #except Exception as err:
-            #    print(data["img_path"])
-            #    print(err)
-            #   nn = str(random.randint(4000,5000))
-            #    cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), cv2.cvtColor(cvimg, cv2.COLOR_RGB2BGR))                
-            bboxes = bboxes.cpu().numpy()
-            # Assume only one hand in image. Select the bbox with the highest score
-            bbox = bboxes[0]
-            for bb in bboxes:
-                if bb[-1] > bbox[-1]:
-                    bbox = bb
-            #print(bbox)
-            #print("===========================")
-            aspect_ratio = 1.0
-            x1 = bbox[0]
-            y1 = bbox[1]
-            x2 = bbox[2]
-            y2 = bbox[3]
-            center_x = (x1 + x2) // 2
-            center_y = (y1 + y2) // 2
-            bb_width = x2 - x1
-            bb_height = y2 - y1
-            
-            if bb_width > aspect_ratio * bb_height:
-                bb_height = bb_width * 1.0 / aspect_ratio
-            elif bb_width < aspect_ratio * bb_height:
-                bb_width = bb_height * aspect_ratio
-                
-            bb_width *= cfg.pad_factor
-            bb_height *= cfg.pad_factor            
+            #try:
+            if cfg.online_hand_detection:
+                bbox = augment.find_bb_hand_detector(data['img_path'])
+            else:
+                bbox = data["faster_rccn_bbox"]
+            center_x = bbox[0]
+            center_y = bbox[1]
+            bb_width = bbox[2]
+            bb_height = bbox[3]
             trans = augment.gen_trans_from_patch_cv(center_x, center_y, bb_width, bb_height, cfg.input_shape[1], cfg.input_shape[0], 1.0, inv = False)
             img_patch = cv2.warpPerspective(cvimg, trans, (int(cfg.input_shape[1]), int(cfg.input_shape[0])), flags=cv2.INTER_LINEAR)
             #print("img path before transformation")
@@ -189,12 +192,14 @@ class DatasetLoader(Dataset):
             }
             
             #===================================================================
-            #fig = plt.figure()        
-            #ax1 = fig.add_subplot(121)
-            #ax1.imshow((255*img_patch/np.max(img_patch)).astype(np.uint8))
-            #ax1.axis('off')
-            #nn = str(random.randint(1,3000))
-            #plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
+            #===================================================================
+            # fig = plt.figure()        
+            # ax1 = fig.add_subplot(121)
+            # ax1.imshow((255*img_patch/np.max(img_patch)).astype(np.uint8))
+            # ax1.axis('off')
+            # nn = str(random.randint(1,3000))
+            # plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
+            #===================================================================
             #===================================================================
             
             img_patch = self.transform(img_patch)

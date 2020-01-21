@@ -16,13 +16,14 @@ import augment
 from FreiHand_config import FreiHandConfig
 import matplotlib.pyplot as plt
 import random
+
 plt.switch_backend('agg')
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', type=str, dest='gpu_ids')
     parser.add_argument('--test_epoch', type=str, dest='test_epoch')
     args = parser.parse_args()
-
+    
     # test gpus
     if not args.gpu_ids:
         args.gpu_ids = str(np.argmin(mem_info()))
@@ -50,35 +51,40 @@ def main():
     preds = []
     preds_in_patch_with_score = []
     label_list = []
-    augmentation_list = {
+    params_list = {
         "R": [],
         "cvimg": [],
         "K": [],
         "joint_cam": [],
         "scale": [],
         "img_path": [],
-        "loss": []
+        "loss": [],
+        "ref_bone_len": [],
+        "center_x": [],
+        "center_y": [],
+        "width": [],
+        "height": []
     }
     with torch.no_grad():
-        for itr, (img_patch, label, label_weight, augmentation) in enumerate(tqdm(tester.batch_generator)):
+        for itr, (img_patch, label, label_weight, params) in enumerate(tqdm(tester.batch_generator)):
             img_patch = img_patch.cuda()
             img_patch_sav = np.copy(img_patch[0].permute(1, 2, 0).cpu().detach().numpy())
             label = label.cuda()
             label_weight = label_weight.cuda()
-            center_x = augmentation["bbox"][0].cuda()
-            center_y = augmentation["bbox"][1].cuda()
-            width = augmentation["bbox"][2].cuda()
-            height = augmentation["bbox"][3].cuda()
-            scale = augmentation["scale"].cuda()
-            R = augmentation["R"].cuda()
-            trans = augmentation["trans"].cuda()
-            zoom_factor = augmentation["zoom_factor"].cuda()
-            z_mean = augmentation["z_mean"].cuda()
-            f = augmentation["f"].cuda()
-            K = augmentation["K"].cuda()
-            joint_cam = augmentation["joint_cam"].cuda()
-            joint_img = augmentation["joint_img_sav"][0].numpy()
-            joint_img_orig = augmentation["joint_img_orig"][0].numpy()
+            center_x = params["bbox"][0].cuda()
+            center_y = params["bbox"][1].cuda()
+            width = params["bbox"][2].cuda()
+            height = params["bbox"][3].cuda()
+            scale = params["scale"].cuda()
+            R = params["R"].cuda()
+            trans = params["trans"].cuda()
+            zoom_factor = params["zoom_factor"].cuda()
+            z_mean = params["z_mean"].cuda()
+            f = params["f"].cuda()
+            K = params["K"].cuda()
+            joint_cam = params["joint_cam"].cuda()
+            joint_img = params["joint_img_sav"][0].numpy()
+            joint_img_orig = params["joint_img_orig"][0].numpy()
             heatmap_out = tester.model(img_patch)
             if cfg.num_gpus > 1:
                 heatmap_out = gather(heatmap_out,0)
@@ -117,34 +123,47 @@ def main():
             coord_out = softmax_integral_tensor(heatmap_out, tester.joint_num, hm_width, hm_height, hm_depth)
             coord_out = coord_out.cpu().numpy()
             preds.append(coord_out)
-            augmentation_list["R"].append(augmentation["R"])
-            augmentation_list["cvimg"].append(augmentation["cvimg"])
-            augmentation_list["K"].append(augmentation["K"])
-            augmentation_list["joint_cam"].append(augmentation["joint_cam"])
-            augmentation_list["scale"].append(augmentation["scale"])
-            augmentation_list["img_path"].append(augmentation["img_path"])
-            augmentation_list["loss"].append(JointLocationLoss.detach())
+            params_list["R"].append(params["R"])
+            params_list["cvimg"].append(params["cvimg"])
+            params_list["K"].append(params["K"])
+            params_list["joint_cam"].append(params["joint_cam"])
+            params_list["scale"].append(params["scale"])
+            params_list["img_path"].append(params["img_path"])
+            params_list["ref_bone_len"].append(params["ref_bone_len"])
+            params_list["center_x"].append(params["bbox"][0])
+            params_list["center_y"].append(params["bbox"][1])
+            params_list["width"].append(params["bbox"][2])
+            params_list["height"].append(params["bbox"][3])
+            params_list["loss"].append(JointLocationLoss.detach())
             preds_in_patch_with_score.append(augment.get_joint_location_result(cfg.patch_width, cfg.patch_height, heatmap_out))
             #print(data['label'].cpu().detach().numpy().shape)
             label_list.append(augment.test_get_joint_loc_res(label.cpu().detach().numpy()))
+            #if itr > 2:
+            #    break
             
     preds = np.concatenate(preds, axis=0)
     _p = np.concatenate(preds_in_patch_with_score, axis=0)
-    _p_label = np.concatenate(label_list, axis=0)
+    _p_label = np.concatenate(label_list, axis=0) 
     #print(_p.shape)
     #_p = _p.reshape((_p.shape[0] * _p.shape[1], _p.shape[2], _p.shape[3]))
     preds_in_patch_with_score = _p[0: tester.num_samples]
     label_list = _p_label[0: tester.num_samples]
     #print(np.array(preds_in_patch_with_score).shape)
     
-    augmentation_list["R"] = np.concatenate(augmentation_list["R"], axis=0)
-    augmentation_list["cvimg"] = np.concatenate(augmentation_list["cvimg"], axis=0)
-    augmentation_list["K"] = np.concatenate(augmentation_list["K"], axis=0)
-    augmentation_list["joint_cam"] = np.concatenate(augmentation_list["joint_cam"], axis=0)
-    augmentation_list["scale"] = np.concatenate(augmentation_list["scale"], axis=0)
-    augmentation_list["img_path"] = np.concatenate(augmentation_list["img_path"], axis=0)
+    params_list["R"] = np.concatenate(params_list["R"], axis=0)
+    params_list["cvimg"] = np.concatenate(params_list["cvimg"], axis=0)
+    params_list["K"] = np.concatenate(params_list["K"], axis=0)
+    #params_list["bbox"] = np.concatenate(params_list["bbox"], axis=0)
+    params_list["joint_cam"] = np.concatenate(params_list["joint_cam"], axis=0)
+    params_list["scale"] = np.concatenate(params_list["scale"], axis=0)
+    params_list["img_path"] = np.concatenate(params_list["img_path"], axis=0)
+    params_list["ref_bone_len"] = np.concatenate(params_list["ref_bone_len"], axis=0)
+    params_list["center_x"] = np.concatenate(params_list["center_x"], axis=0)
+    params_list["center_y"] = np.concatenate(params_list["center_y"], axis=0)
+    params_list["width"] = np.concatenate(params_list["width"], axis=0)
+    params_list["height"] = np.concatenate(params_list["height"], axis=0)
     
-    tester._evaluate(preds_in_patch_with_score, label_list, augmentation_list, cfg.result_dir) 
+    tester._evaluate(preds_in_patch_with_score, label_list, params_list, cfg.result_dir) 
 
 if __name__ == "__main__":
     main()

@@ -75,8 +75,8 @@ def main():
             params["img_path"].append(data["img_path"])
             params["bbox"].append(np.array(data["bbox"]))
             preds_in_patch_with_score.append(augment.get_joint_location_result(cfg.patch_width, cfg.patch_height, heatmap_out))
-            if itr > 10:
-                break
+            #if itr > 10:
+            #    break
     
     preds = np.concatenate(preds, axis=0)
     _p = np.concatenate(preds_in_patch_with_score, axis=0)

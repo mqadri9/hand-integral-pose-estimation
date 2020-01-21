@@ -179,6 +179,9 @@ def trans_coords_from_patch_to_org_3d(coords_in_patch, c_x, c_y, bb_width, bb_he
     zoom_factor = max(bb_width, bb_height)
     #res_img[:, 2] = (coords_in_patch[:, 2] / cfg.patch_width) * cfg.bbox_3d_shape[0] * scale
     #print(coords_in_patch[:, 2])
+    #print(scale)
+    #print(cfg.patch_width)
+    #print(coords_in_patch)
     res_img[:, 2] = coords_in_patch[:, 2] / cfg.patch_width * (zoom_factor * scale)
     #res_img[:, 2] = (coords_in_patch[:, 2] * cfg.patch_width * z_mean) / (zoom_factor * f)
     return res_img
@@ -275,53 +278,56 @@ def find_bb(uv, joint_vis, aspect_ratio=1.0):
     h = d - u
     assert w > 0
     assert h > 0
-
-    if w > aspect_ratio * h:
-        h = w * 1.0 / aspect_ratio
-    elif w < aspect_ratio * h:
-        w = h * aspect_ratio
-        
-    w *= cfg.pad_factor
-    h *= cfg.pad_factor
     #w = np.clip(w, 0, cfg.patch_width)
     #h = np.clip(h, 0, cfg.patch_height)
     bbox = [center_x, center_y, w, h]
+    bbox = scale_bb(bbox, aspect_ratio=aspect_ratio)
     return bbox
 
-#===============================================================================
-# def find_perspective_bounds(T, cvimg):
-#     src_w = cvimg.shape[1]
-#     src_h = cvimg.shape[0]
-#     
-#     src_l = np.array([0, 0, 1], dtype=np.float32) # start_c
-#     src_r = np.array([0, src_h, 1], dtype=np.float32) # start_a
-#     src_t = np.array([src_w, 0, 1], dtype=np.float32) # start_b
-#     src_b = np.array([src_w, src_h, 1], dtype=np.float32) # start_d
-# 
-#     dst = np.zeros((3, 4), dtype=np.float32)
-#     dst[:,0] = src_l
-#     dst[:,1] = src_t
-#     dst[:,2] = src_b
-#     dst[:,3] = src_r
-# 
-#     P = T @ dst
-# 
-#     P = P / P[2]
-# 
-#     minx = np.min(P[0])
-#     maxx = np.max(P[0])
-#     miny = np.min(P[1])
-#     maxy = np.max(P[1])
-# 
-#     dst_w = maxx - minx
-#     dst_h = maxy - miny
-#     
-#     return dst_w, dst_h
-#===============================================================================
+def find_bb_hand_detector(img_path, hand_detector, aspect_ratio=1.0):
+    bboxes = hand_detector.detect(img_path)
+    #except Exception as err:
+    #    print(data["img_path"])
+    #    print(err)
+    #   nn = str(random.randint(4000,5000))
+    #    cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), cv2.cvtColor(cvimg, cv2.COLOR_RGB2BGR))                
+    bboxes = bboxes.cpu().numpy()
+    # Assume only one hand in image. Select the bbox with the highest score
+    bbox = bboxes[0]
+    for bb in bboxes:
+        if bb[-1] > bbox[-1]:
+            bbox = bb
+    #print(bbox)
+    #print("===========================")
+    x1 = bbox[0]
+    y1 = bbox[1]
+    x2 = bbox[2]
+    y2 = bbox[3]
+    center_x = (x1 + x2) // 2
+    center_y = (y1 + y2) // 2
+    bb_width = x2 - x1
+    bb_height = y2 - y1
 
+    bbox = scale_bb(bbox, aspect_ratio=aspect_ration)
     
+    return bbox
 
-def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=False): 
+
+def scale_bb(bbox, aspect_ratio=1.0):
+    center_x = bbox[0]
+    center_y = bbox[1]
+    bb_width = bbox[2]
+    bb_height = bbox[3]
+    if bb_width > aspect_ratio * bb_height:
+        bb_height = bb_width * 1.0 / aspect_ratio
+    elif bb_width < aspect_ratio * bb_height:
+        bb_width = bb_height * aspect_ratio
+        
+    bb_width *= cfg.pad_factor
+    bb_height *= cfg.pad_factor
+    return [center_x, center_y, bb_width, bb_height]    
+
+def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=False, hand_detector=None, img_path=None, return_bbox=True, faster_rcnn_bbox=None):
     img = cvimg.copy()
     img_height, img_width, img_channels = img.shape
     
@@ -331,7 +337,6 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
     joint_img_orig[:,1] = uv_orig[:,1]
     # Root centered
     joint_img_orig[:,2] = np.squeeze(z_orig - z_orig[FreiHandConfig.root_idx])
-
     
     homo = K.dot(R).dot(np.linalg.inv(K))
     #dst_w, dst_h = find_perspective_bounds(homo, cvimg)
@@ -343,6 +348,14 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
     #joint_vis = vis[:, 0] > 0
     #joint_vis = np.expand_dims(joint_vis, axis=1)
     uv, z, xyz_rot = projectPoints(joint_cam, R, K)
+
+    if cfg.use_hand_detector and return_bbox:
+        if cfg.online_hand_detection:
+            bbox = find_bb_hand_detector(img_path, hand_detector, aspect_ratio=1.0)
+        else:
+            bbox = faster_rcnn_bbox
+    else:
+        bbox = find_bb(uv, joint_vis)
     
     joint_img = np.zeros((FreiHandConfig.num_joints, 3))
     joint_img[:,0] = uv[:,0]
@@ -350,9 +363,7 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
     # Root centered
     z_mean = np.mean(z)
     joint_img[:,2] = np.squeeze(z - z[FreiHandConfig.root_idx])
-    
-    bbox = find_bb(uv, joint_vis)
-    
+        
     bb_c_x = float(bbox[0])
     bb_c_y = float(bbox[1])
     bb_width = float(bbox[2])
@@ -370,7 +381,7 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
     #print("img patch after transformation")
     #print(img_patch.shape)
     #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), cv2.cvtColor(img_patch, cv2.COLOR_RGB2BGR))
-    return img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean
+    return img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean    
 
 def rotate_2d(pt_2d, rot_rad):
     x = pt_2d[0]

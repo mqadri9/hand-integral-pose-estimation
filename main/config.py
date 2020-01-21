@@ -54,6 +54,7 @@ class Config:
     num_thread = 1
     
     use_hand_detector = False
+    online_hand_detection = False
     checksession = 1
     checkepoch = 2
     checkpoint = 239999

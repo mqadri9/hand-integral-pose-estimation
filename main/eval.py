@@ -130,7 +130,7 @@ def load_data(f, gt_path, pred_file, set_name):
            #if idx%1000 == 0:
            #    print(idx)
            # annotation for this frame
-           _, _, xyz = db_data_anno[idx]
+           _, _, xyz, _ = db_data_anno[idx]
            xyz_list.append(xyz)
     print("Ground truth list length: {}".format(len(xyz_list)))
     print("Loading predictions")
