@@ -204,7 +204,9 @@ def start(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=False):
     # What label is is:
     # the first 2 columns are the projections u and v divided 
     # by patch width and height and the third column is z-z_root of the joint_cam_normalized by patch width
-
+    
+    # joint_cam_normalized[:,2] = np.squeeze(joint_cam_normalized[:,2] - tprime)
+    
     label, label_weight = generate_joint_location_label(patch_width, patch_height, joint_img, joint_vis)
     return label
 
