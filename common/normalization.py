@@ -199,6 +199,12 @@ def start(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=False):
     for n_jt in range(len(joint_img)):
         joint_img[n_jt, 0:2] = trans_point2d(joint_img[n_jt, 0:2], trans)    
     
+    # I believe what PANet need is joint_cam_normalized which is just the scaled version of the 3D hand.
+    # If that is the case you can just return: joint_cam_normalized instead of "label"
+    # What label is is:
+    # the first 2 columns are the projections u and v divided 
+    # by patch width and height and the third column is z-z_root of the joint_cam_normalized by patch width
+
     label, label_weight = generate_joint_location_label(patch_width, patch_height, joint_img, joint_vis)
     return label
 
