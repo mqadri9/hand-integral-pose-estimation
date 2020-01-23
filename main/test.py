@@ -56,6 +56,7 @@ def main():
         "cvimg": [],
         "K": [],
         "joint_cam": [],
+        "joint_cam_normalized": [],
         "scale": [],
         "img_path": [],
         "loss": [],
@@ -63,7 +64,8 @@ def main():
         "center_x": [],
         "center_y": [],
         "width": [],
-        "height": []
+        "height": [],
+        'tprime': []
     }
     with torch.no_grad():
         for itr, (img_patch, label, label_weight, params) in enumerate(tqdm(tester.batch_generator)):
@@ -76,22 +78,19 @@ def main():
             width = params["bbox"][2].cuda()
             height = params["bbox"][3].cuda()
             scale = params["scale"].cuda()
+            tprime = params["tprime"].cuda()
             R = params["R"].cuda()
             trans = params["trans"].cuda()
-            zoom_factor = params["zoom_factor"].cuda()
-            z_mean = params["z_mean"].cuda()
-            f = params["f"].cuda()
             K = params["K"].cuda()
             joint_cam = params["joint_cam"].cuda()
-            joint_img = params["joint_img_sav"][0].numpy()
+            joint_cam_normalized = params["joint_cam_normalized"].cuda()
             joint_img_orig = params["joint_img_orig"][0].numpy()
             heatmap_out = tester.model(img_patch)
             if cfg.num_gpus > 1:
                 heatmap_out = gather(heatmap_out,0)
             JointLocationLoss = tester.JointLocationLoss(heatmap_out, label, label_weight)
-            JointLocationLoss2 = tester.JointLocationLoss2(heatmap_out, label, label_weight, joint_cam, center_x,
-                                                           center_y, width, height, scale, R, trans,
-                                                           zoom_factor, z_mean, f, K)
+            JointLocationLoss2 = tester.JointLocationLoss2(heatmap_out, label, label_weight, joint_cam, joint_cam_normalized, center_x,
+                                                           center_y, width, height, scale, R, trans, K, tprime)
             loss1 = JointLocationLoss.detach()
             #===================================================================
             # if loss1 > 10:
@@ -124,9 +123,10 @@ def main():
             coord_out = coord_out.cpu().numpy()
             preds.append(coord_out)
             params_list["R"].append(params["R"])
-            params_list["cvimg"].append(params["cvimg"])
+            #params_list["cvimg"].append(params["cvimg"])
             params_list["K"].append(params["K"])
             params_list["joint_cam"].append(params["joint_cam"])
+            params_list["joint_cam_normalized"].append(params["joint_cam_normalized"])
             params_list["scale"].append(params["scale"])
             params_list["img_path"].append(params["img_path"])
             params_list["ref_bone_len"].append(params["ref_bone_len"])
@@ -134,11 +134,12 @@ def main():
             params_list["center_y"].append(params["bbox"][1])
             params_list["width"].append(params["bbox"][2])
             params_list["height"].append(params["bbox"][3])
+            params_list["tprime"].append(params["tprime"])
             params_list["loss"].append(JointLocationLoss.detach())
             preds_in_patch_with_score.append(augment.get_joint_location_result(cfg.patch_width, cfg.patch_height, heatmap_out))
             #print(data['label'].cpu().detach().numpy().shape)
             label_list.append(augment.test_get_joint_loc_res(label.cpu().detach().numpy()))
-            #if itr > 2:
+            #if itr >=0:
             #    break
             
     preds = np.concatenate(preds, axis=0)
@@ -151,10 +152,11 @@ def main():
     #print(np.array(preds_in_patch_with_score).shape)
     
     params_list["R"] = np.concatenate(params_list["R"], axis=0)
-    params_list["cvimg"] = np.concatenate(params_list["cvimg"], axis=0)
+    #params_list["cvimg"] = np.concatenate(params_list["cvimg"], axis=0)
     params_list["K"] = np.concatenate(params_list["K"], axis=0)
     #params_list["bbox"] = np.concatenate(params_list["bbox"], axis=0)
     params_list["joint_cam"] = np.concatenate(params_list["joint_cam"], axis=0)
+    params_list["joint_cam_normalized"] = np.concatenate(params_list["joint_cam_normalized"], axis=0)
     params_list["scale"] = np.concatenate(params_list["scale"], axis=0)
     params_list["img_path"] = np.concatenate(params_list["img_path"], axis=0)
     params_list["ref_bone_len"] = np.concatenate(params_list["ref_bone_len"], axis=0)
@@ -162,6 +164,7 @@ def main():
     params_list["center_y"] = np.concatenate(params_list["center_y"], axis=0)
     params_list["width"] = np.concatenate(params_list["width"], axis=0)
     params_list["height"] = np.concatenate(params_list["height"], axis=0)
+    params_list["tprime"] = np.concatenate(params_list["tprime"], axis=0)
     
     tester._evaluate(preds_in_patch_with_score, label_list, params_list, cfg.result_dir) 
 

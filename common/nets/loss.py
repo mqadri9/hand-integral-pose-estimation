@@ -83,7 +83,7 @@ class JointLocationLoss2(nn.Module):
         super(JointLocationLoss2, self).__init__()
         self.size_average = True
 
-    def forward(self, heatmap_out, gt_label, gt_vis, joint_cam, center_x, center_y, width, height, scale, R, trans, zoom_factor, z_mean, f, K):
+    def forward(self, heatmap_out, gt_label, gt_vis, joint_cam, joint_cam_normalized, center_x, center_y, width, height, scale, R, trans, K, tprime):
         
         joint_num = int(gt_label.shape[1]/3)
         #print(heatmap_out.shape)
@@ -102,6 +102,7 @@ class JointLocationLoss2(nn.Module):
         label = augment.test_get_joint_loc_res(coord_out)
         label_gt = augment.test_get_joint_loc_res(gt_label.detach().cpu().numpy())
         joint_cam = joint_cam.detach().cpu().numpy()
+        joint_cam_normalized = joint_cam_normalized.detach().cpu().numpy()
         center_x = center_x.detach().cpu().numpy()
         center_y = center_y.detach().cpu().numpy()
         width = width.detach().cpu().numpy()
@@ -110,11 +111,8 @@ class JointLocationLoss2(nn.Module):
         R = R.detach().cpu().numpy()
         trans = trans.detach().cpu().numpy()
         trans = np.linalg.inv(trans)
-        zoom_factor = zoom_factor.detach().cpu().numpy()
-        z_mean = z_mean.detach().cpu().numpy()
-        f = f.detach().cpu().numpy()
         K = K.detach().cpu().numpy()
-        
+        tprime = tprime.detach().cpu().numpy()
         #=======================================================================
         # print(label_gt[0])
         # print(augmentation["joint_img3"][0])  
@@ -125,11 +123,11 @@ class JointLocationLoss2(nn.Module):
             tmp = augment.trans_coords_from_patch_to_org_3d(label[n_sample], center_x[n_sample],
                                                            center_y[n_sample], width[n_sample], height[n_sample], 
                                                            cfg.patch_width, cfg.patch_height, scale[n_sample], 
-                                                           trans[n_sample], zoom_factor[n_sample], z_mean[n_sample], f[n_sample])
+                                                           trans[n_sample], tprime[n_sample])
             tmp2 = augment.trans_coords_from_patch_to_org_3d(label_gt[n_sample], center_x[n_sample],
                                                             center_y[n_sample], width[n_sample], height[n_sample], 
                                                             cfg.patch_width, cfg.patch_height, scale[n_sample], 
-                                                            trans[n_sample], zoom_factor[n_sample], z_mean[n_sample], f[n_sample])
+                                                            trans[n_sample], tprime[n_sample])
             
             
             #===================================================================
@@ -138,9 +136,9 @@ class JointLocationLoss2(nn.Module):
             #===================================================================
             #tmp2 = torch.from_numpy(tmp2)
             #tmp = torch.from_numpy(tmp)
-            tmp[:,2] = tmp[:,2] + xyz_rot[:,2][9]*1000
+            #tmp[:,2] = tmp[:,2] + xyz_rot[:,2][9]*1000
             
-            tmp2[:,2] = tmp2[:,2] + xyz_rot[:,2][9]*1000
+            #tmp2[:,2] = tmp2[:,2] + xyz_rot[:,2][9]*1000
             
             pre_3d = augment.pixel2cam(tmp, K[n_sample])
             label_3d_kpt = augment.pixel2cam(tmp2, K[n_sample])
@@ -150,17 +148,16 @@ class JointLocationLoss2(nn.Module):
             pre_3d = np.matmul(Rn.T, pre_3d.T).T
             #pre_3d = torch.matmul(R[n_sample], pre_3d.transpose(1, 0)).transpose(1,0)
             pre_3d_kpt.append(pre_3d)
-            #print(label_3d_kpt)
-            #print(joint_cam[n_sample])
             try:
-                assert np.allclose(label_3d_kpt, joint_cam[n_sample], rtol=1e-6, atol=1e-6)
+                assert np.allclose(label_3d_kpt, joint_cam_normalized[n_sample], rtol=1e-6, atol=1e-6)
             except:
-                print(label_3d_kpt)
-                print(joint_cam[n_sample])
+                print("(loss::JointLocationLoss2) Warning: label_3d_kpt and joint_cam_normalized are not equal.")
+                #print(label_3d_kpt)
+                #print(joint_cam_normalized)
         pre_3d_kpt = np.array(pre_3d_kpt)
         loss = []
         for i in range(pre_3d_kpt.shape[0]):          
-            diff = joint_cam[i] - pre_3d_kpt[i]
+            diff = joint_cam_normalized[i] - pre_3d_kpt[i]
             #euclidean_dist = np.sqrt(np.sum(np.square(diff), axis=1))
             euclidean_dist = np.sum(np.square(diff), axis=1)
             loss.append(euclidean_dist)

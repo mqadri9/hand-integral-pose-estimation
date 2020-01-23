@@ -79,7 +79,6 @@ class DatasetLoader(Dataset):
             data = copy.deepcopy(self.db[index])
           
         if not self.is_eval:
-            
             K = data['K']
             joint_cam = data["joint_cam"]
             faster_rcnn_bbox = data['faster_rccn_bbox']
@@ -98,19 +97,20 @@ class DatasetLoader(Dataset):
                 #scale, rot, color_scale = 1.0, 0, [1.0, 1.0, 1.0]
             else:
                 scale, R, color_scale = 1.0, np.eye(3), [1.0, 1.0, 1.0]
-            
             if cfg.use_hand_detector:
-                img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False, 
+                img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False, 
                                                                                                                                              hand_detector=self.hand_detector, 
                                                                                                                                              img_path=data['img_path'],
                                                                                                                                              faster_rcnn_bbox=faster_rcnn_bbox)
             else:
-                img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False)
+                img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False)
             
-            # 4. generate patch joint ground truth        
+            # 4. generate patch joint ground truth
+            
             for n_jt in range(len(joint_img)):
                 joint_img[n_jt, 0:2] = augment.trans_point2d(joint_img[n_jt, 0:2], trans)
-
+            
+              
             params = {
                 "R": R,
                 "cvimg": cvimg,
@@ -118,12 +118,10 @@ class DatasetLoader(Dataset):
                 "joint_cam": joint_cam,
                 "scale": scale,
                 "img_path": data['img_path'],
-                "zoom_factor": zoom_factor,
-                "f": f,
-                "z_mean": z_mean,
+                "tprime": tprime,
                 "bbox": bbox,
                 "trans": trans,
-                "joint_img_sav": np.copy(joint_img),
+                "joint_cam_normalized": joint_cam_normalized,
                 "joint_img_orig": joint_img_orig,
                 "ref_bone_len": data["ref_bone_len"]
             }
@@ -151,12 +149,11 @@ class DatasetLoader(Dataset):
             for n_c in range(img_channels):
                 img_patch[n_c, :, :] = np.clip(img_patch[n_c, :, :] * color_scale[n_c], 0, 255)
             
-            for n_jt in range(len(joint_img)):
-                zoom_factor = max(bbox[3], bbox[2])
+            #for n_jt in range(len(joint_img)):
+            #    zoom_factor = max(bbox[3], bbox[2])
                 #joint_img[n_jt, 2] = (joint_img[n_jt, 2] * f * zoom_factor) / (z_mean * cfg.patch_width)
-                joint_img[n_jt, 2] = joint_img[n_jt, 2] / (zoom_factor * scale) * cfg.patch_width
+            #    joint_img[n_jt, 2] = joint_img[n_jt, 2] / (zoom_factor * scale) * cfg.patch_width
                 #joint_img[n_jt, 2] = joint_img[n_jt, 2] / (cfg.bbox_3d_shape[0] * scale) * cfg.patch_width
-    
             label, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)
             if self.is_train:
                 return img_patch, label, label_weight, params
@@ -183,12 +180,20 @@ class DatasetLoader(Dataset):
             # Swap first and last columns # BGR to RGB
             img_patch = img_patch[:,:,::-1].copy()
             img_patch = img_patch.astype(np.float32)
+            L = max(bbox[2], bbox[3])
+            K = data["K"]
+            if L == bbox[2]:
+                # multiply by a 100 to increase the value ranges of joint_cam_normalized at line 375
+                # so basically scale the hand to be a constant length of 100 instead of 1
+                tprime = cfg.scaling_constant * K[0, 0] / L
+            else: 
+                tprime = cfg.scaling_constant * K[1, 1] / L
             params = {
                 "K": data["K"],
-                "bone_length": data["bone_length"],
+                "ref_bone_len": data["ref_bone_len"],
                 "img_path": data["img_path"],
                 "bbox": np.array([center_x, center_y, bb_width, bb_height]),
-                "cvimg": cvimg,
+                "tprime": tprime
             }
             
             #===================================================================

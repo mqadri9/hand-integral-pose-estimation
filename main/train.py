@@ -61,16 +61,14 @@ def main():
             scale = augmentation["scale"].cuda()
             R = augmentation["R"].cuda()
             trans = augmentation["trans"].cuda()
-            zoom_factor = augmentation["zoom_factor"].cuda()
-            z_mean = augmentation["z_mean"].cuda()
-            f = augmentation["f"].cuda()
             K = augmentation["K"].cuda()
             joint_cam = augmentation["joint_cam"].cuda()
+            tprime = augmentation["tprime"].cuda()
+            joint_cam_normalized = augmentation["joint_cam_normalized"].cuda()
             heatmap_out = trainer.model(img_patch)
             JointLocationLoss = trainer.JointLocationLoss(heatmap_out, label, label_weight)
-            JointLocationLoss2 = trainer.JointLocationLoss2(heatmap_out, label, label_weight, joint_cam, center_x,
-                                                           center_y, width, height, scale, R, trans,
-                                                           zoom_factor, z_mean, f, K)
+            JointLocationLoss2 = tester.JointLocationLoss2(heatmap_out, label, label_weight, joint_cam, joint_cam_normalized, center_x,
+                                                           center_y, width, height, scale, R, trans, K, tprime)
 
             loss = JointLocationLoss
 
@@ -111,18 +109,16 @@ def main():
                 scale = augmentation["scale"].cuda()
                 R = augmentation["R"].cuda()
                 trans = augmentation["trans"].cuda()
-                zoom_factor = augmentation["zoom_factor"].cuda()
-                z_mean = augmentation["z_mean"].cuda()
-                f = augmentation["f"].cuda()
                 K = augmentation["K"].cuda()
                 joint_cam = augmentation["joint_cam"].cuda()
+                tprime = augmentation["tprime"].cuda()
+                joint_cam_normalized = augmentation["joint_cam_normalized"].cuda()
                 heatmap_out = trainer.model(img_patch)
                 #if cfg.num_gpus > 1:
                 #    heatmap_out = gather(heatmap_out,0)
                 JointLocationLoss = trainer.JointLocationLoss(heatmap_out, label, label_weight)
-                JointLocationLoss2 = trainer.JointLocationLoss2(heatmap_out, label, label_weight, joint_cam, center_x,
-                                                               center_y, width, height, scale, R, trans,
-                                                               zoom_factor, z_mean, f, K)
+                JointLocationLoss2 = tester.JointLocationLoss2(heatmap_out, label, label_weight, joint_cam, joint_cam_normalized, center_x,
+                                                               center_y, width, height, scale, R, trans, K, tprime)
 
                 loss_sum2 += JointLocationLoss2.detach()
                 loss_sum += JointLocationLoss.detach()

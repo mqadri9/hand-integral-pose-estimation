@@ -132,6 +132,7 @@ def load_data(f, gt_path, pred_file, set_name):
            # annotation for this frame
            _, _, xyz, _ = db_data_anno[idx]
            xyz_list.append(xyz)
+    xyz_list = np.load("ground_truth_test.npy")
     print("Ground truth list length: {}".format(len(xyz_list)))
     print("Loading predictions")
     predictions = np.load(pred_file)

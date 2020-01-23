@@ -18,9 +18,9 @@ class FreiHand:
     sample = 'sample'  # auto colorization with sample points
     auto = 'auto'  # auto colorization without sample points: automatic color hallucination
     
-    def __init__(self, data_split="training"):
+    def __init__(self, data_split="training", is_eval=False):
         self.data_split = data_split
-        self.data_split = "training"
+        #self.data_split = "training"
         self.data_dir = os.path.join('..', 'data', 'FreiHand')
         #if data_split == "training":
         #    self.data_dir = os.path.join('..', 'data', 'FreiHand', 'training', 'rgb')
@@ -33,7 +33,7 @@ class FreiHand:
         self.eval_joint = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
         self.root_idx = 9
         self.size_db = 32560
-        if cfg.use_hand_detector:
+        if is_eval or cfg.use_hand_detector:
             self.hand_detector = HandDetector(cfg.checksession, cfg.checkepoch, cfg.checkpoint, cuda=True, thresh=0.001)
             self.hand_detector.load_faster_rcnn_detector()
         else:
@@ -171,11 +171,11 @@ class FreiHand:
         """ Hardcoded size of the datasets. """
         if data_split == 'training':
             #return 32560  # number of unique samples (they exists in multiple 'versions')
-            #return 30000
-            return 32550
+            return 30000
+            #return 10
         elif data_split == "testing":
-            #return 2560
-            return 10
+            return 2560
+            #return 10
         elif data_split == 'evaluation':
             return 3960
         else:
@@ -325,10 +325,10 @@ class FreiHand:
             img_path = os.path.join(img_rgb_path, lst[i] + '.jpg')
             bbox = augment.find_bb_hand_detector(img_path, self.hand_detector)
             d = {
-                "K": K_list[i],
-                "bone_length": scale_list[i],
+                "K": np.array(K_list[i]),
+                "ref_bone_len": scale_list[i],
                 "img_path": os.path.join(img_rgb_path, lst[i] + '.jpg'),
-                "bbox": bbox
+                "faster_rccn_bbox": np.array(bbox)
             }
             data.append(d)
         with open(cache_file, 'wb') as fid:
@@ -432,6 +432,7 @@ class FreiHand:
         for i in range(len_gts):
             K = params_list['K'][i]
             joint_cam = params_list["joint_cam"][i]
+            joint_cam_normalized = params_list["joint_cam_normalized"][i]
             R = params_list["R"][i]
             scale = params_list["scale"][i]
             ref_bone_len = params_list["ref_bone_len"][i]
@@ -440,7 +441,7 @@ class FreiHand:
             width = params_list["width"][i]
             height = params_list["height"][i]
             img_path = params_list['img_path'][i]
-            #cvimg = cv2.imread(d['img_path'], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+            cvimg = cv2.imread(img_path, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
             #===================================================================
             # print(R)
             # img_patch, trans1, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox = augment.generate_patch_image(augmentation_list["cvimg"][i], 
@@ -449,7 +450,7 @@ class FreiHand:
             #                                                                                                      aspect_ratio=1.0, inv=False)
             #===================================================================
             
-            img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, _, zoom_factor, f, z_mean = augment.generate_patch_image(params_list["cvimg"][i], 
+            img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, _, tprime = augment.generate_patch_image(cvimg, 
                                                                                                                                       joint_cam, 
                                                                                                                                       scale, R, K, 
                                                                                                                                       aspect_ratio=1.0, inv=True, 
@@ -457,11 +458,6 @@ class FreiHand:
                                                                                                                                       img_path=img_path,
                                                                                                                                       return_bbox=True,
                                                                                                                                       faster_rcnn_bbox = np.array([center_x, center_y, width, height]))
-            #===================================================================
-            # print(trans1)
-            # print(trans)
-            # print(np.linalg.inv(trans))
-            #===================================================================
             data = {
                 'image': img_path,
                 'center_x': center_x,
@@ -475,13 +471,12 @@ class FreiHand:
                 'K': K,
                 'R': R,
                 'trans': trans,
-                'cvimg': params_list["cvimg"][i],
+                'cvimg': cvimg,
                 'scale': scale,
-                'z_mean': z_mean,
-                'f': f,
-                'zoom_factor': zoom_factor,
+                'tprime': tprime,
                 "ref_bone_len": ref_bone_len,
-                'img_path': img_path
+                'img_path': img_path,
+                'joint_cam_normalized': joint_cam_normalized
             }
             gts.append(data)
         return gts
@@ -489,7 +484,8 @@ class FreiHand:
     def test_verify_identity(self, n, gt_3d_kpt, gts):
         #=======================================================================
         joint_vis = np.ones(gt_3d_kpt.shape, dtype=np.float)
-        cvimg = gts[n]['cvimg']
+        cvimg = cv2.imread( gts[n]['img_path'], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+        #cvimg = gts[n]['cvimg']
         # # Augment
         # #print("===================================")
         # #print(gt_3d_kpt)
@@ -499,14 +495,15 @@ class FreiHand:
         scale = gts[n]["scale"]
         R = gts[n]['R']
         K = gts[n]['K']
+        tprime = gts[n]['tprime']
         if cfg.use_hand_detector:
-            img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False, 
-                                                                                                                                         hand_detector=self.hand_detector, 
-                                                                                                                                         img_path=gts[n]['img_path'],
-                                                                                                                                         faster_rcnn_bbox=gts[n]["bbox"])
+            img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False, 
+                                                                                                                         hand_detector=self.hand_detector, 
+                                                                                                                         img_path=gts[n]['img_path'],
+                                                                                                                         faster_rcnn_bbox=gts[n]["bbox"])
 
         else:
-            img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False)
+            img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False)
         joint_img_sav_1 = np.copy(joint_img)
         for n_jt in range(len(joint_img)):
             joint_img[n_jt, 0:2] = augment.trans_point2d(joint_img[n_jt, 0:2], trans)
@@ -520,20 +517,13 @@ class FreiHand:
         #=======================================================================
         # #=======================================================================
         #print(joint_img)
-        for n_jt in range(len(joint_img)):
+        #for n_jt in range(len(joint_img)):
             # TODO divide by rect_3d_width
-            zoom_factor = max(bbox[3], bbox[2])
-            joint_img[n_jt, 2] = joint_img[n_jt, 2] / (zoom_factor * scale) * cfg.patch_width
+        #    zoom_factor = max(bbox[3], bbox[2])
+        #    joint_img[n_jt, 2] = joint_img[n_jt, 2] / (zoom_factor * scale) * cfg.patch_width
         # #=======================================================================
         #     #joint_img[n_jt, 2] = joint_img[n_jt, 2] / (cfg.bbox_3d_shape[0] * scale) * cfg.patch_width
-        # 
-        #=======================================================================
-        # for n_jt in range(len(joint_img)):
-        #     # TODO divide by rect_3d_width
-        #     zoom_factor = max(bbox[3], bbox[2])
-        #     joint_img[n_jt, 2] = (joint_img[n_jt, 2] * f * zoom_factor) / (z_mean * cfg.patch_width)
-        #=======================================================================
-        # 
+        #
         joint_img_sav_2 = np.copy(joint_img)
         label, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)
         #=======================================================================
@@ -558,21 +548,14 @@ class FreiHand:
                                                                gts[n]['center_y'], gts[n]['width'],
                                                                gts[n]['height'], cfg.patch_width, 
                                                                cfg.patch_height, scale, gts[n]['trans'], 
-                                                               gts[n]['zoom_factor'], gts[n]['z_mean'], gts[n]['f'])
-        #=======================================================================
-        #print(pre_2d_kpt)
-        #print(joint_img_sav_1)
-        #=======================================================================
-        assert np.allclose(pre_2d_kpt, joint_img_sav_1, rtol=1e-6, atol=1e-6)
-        
-        
-        pre_2d_kpt[:,2] = pre_2d_kpt[:,2] + xyz_rot[:,2][9]*1000
+                                                               gts[n]['tprime'])        
         
         pre_3d_kpt = augment.pixel2cam(pre_2d_kpt, gts[n]['K']) 
+        assert np.allclose(pre_3d_kpt, joint_cam_normalized, rtol=1e-6, atol=1e-6)
+        pre_3d_kpt = pre_3d_kpt * xyz_rot[:,2][9]*1000 / tprime
+        #pre_3d_kpt = augment.pixel2cam(pre_2d_kpt, gts[n]['K']) 
         pre_3d_kpt = np.matmul(gts[n]["R"].T, pre_3d_kpt.T).T
         
-        #print(pre_3d_kpt)
-        #print(gt_3d_kpt_save)
         assert np.allclose(pre_3d_kpt, gt_3d_kpt_save, rtol=1e-6, atol=1e-6)
 
 
@@ -585,6 +568,44 @@ class FreiHand:
         Ym = xyz[10, 1]
         Zm = xyz[10, 2]
         return np.sqrt((Xn - Xm)**2 + (Yn - Ym)**2 + (Zn - Zm)**2)
+ 
+    def scale_result(self, pre_3d_kpt, method="scale", bone_length=None, root_depth=None, tprime=None, label_3d_kpt=None):
+        pred_3d_kpt_tmp = np.copy(pre_3d_kpt)
+        if label_3d_kpt is not None:
+            label_3d_kpt_tmp = np.copy(label_3d_kpt)
+        else:
+            label_3d_kpt_tmp = None
+        if method == "scale":
+            assert bone_length, "for method='scale', the reference bone length need to be specified"
+            Xn = pre_3d_kpt[9, 0]
+            Yn = pre_3d_kpt[9, 1]
+            Zn = pre_3d_kpt[9, 2]
+            Xm = pre_3d_kpt[10, 0]
+            Ym = pre_3d_kpt[10, 1]
+            Zm = pre_3d_kpt[10, 2]
+            pred_distance = np.sqrt((Xn - Xm)**2 + (Yn - Ym)**2 + (Zn - Zm)**2)
+            #print("=========")
+            #print(pred_distance)
+            #print(bone_length)
+            alpha = bone_length/pred_distance
+            pred_3d_kpt_tmp = alpha * pred_3d_kpt_tmp
+            Xn = pred_3d_kpt_tmp[9, 0]
+            Yn = pred_3d_kpt_tmp[9, 1]
+            Zn = pred_3d_kpt_tmp[9, 2]
+            Xm = pred_3d_kpt_tmp[10, 0]
+            Ym = pred_3d_kpt_tmp[10, 1]
+            Zm = pred_3d_kpt_tmp[10, 2]
+            #print(np.sqrt((Xn - Xm)**2 + (Yn - Ym)**2 + (Zn - Zm)**2))
+            if label_3d_kpt is not None:
+                label_3d_kpt_tmp = alpha * label_3d_kpt_tmp
+        if method == "normalize":
+            assert root_depth, "for method='normalize', the root_depth need to be specified"
+            assert tprime, "for method='normalize', the tprime need to be specified"
+            if label_3d_kpt is not None:
+                label_3d_kpt_tmp = label_3d_kpt_tmp * root_depth / tprime
+            pred_3d_kpt_tmp = pred_3d_kpt_tmp * root_depth / tprime
+        
+        return pred_3d_kpt_tmp, label_3d_kpt_tmp 
           
     def evaluate(self, preds_in_patch_with_score, label_list, params_list, result_dir):
         
@@ -605,12 +626,12 @@ class FreiHand:
                 augment.trans_coords_from_patch_to_org_3d(preds_in_patch_with_score[n_sample], gts[n_sample]['center_x'],
                                                           gts[n_sample]['center_y'], gts[n_sample]['width'],
                                                           gts[n_sample]['height'], cfg.patch_width, cfg.patch_height, gts[n_sample]['scale'], 
-                                                          gts[n_sample]['trans'], gts[n_sample]['zoom_factor'], gts[n_sample]['z_mean'], gts[n_sample]['f']))
+                                                          gts[n_sample]['trans'], gts[n_sample]['tprime']))
             label_in_img_with_score.append(
                 augment.trans_coords_from_patch_to_org_3d(label_list[n_sample], gts[n_sample]['center_x'],
                                                           gts[n_sample]['center_y'], gts[n_sample]['width'],
                                                           gts[n_sample]['height'], cfg.patch_width, cfg.patch_height, gts[n_sample]['scale'], 
-                                                          gts[n_sample]['trans'], gts[n_sample]['zoom_factor'], gts[n_sample]['z_mean'], gts[n_sample]['f']))
+                                                          gts[n_sample]['trans'], gts[n_sample]['tprime']))
     
         preds_in_img_with_score = np.asarray(preds_in_img_with_score)
         label_in_img_with_score = np.asarray(label_in_img_with_score)
@@ -628,50 +649,36 @@ class FreiHand:
             gt = gts[n]
             R = gt["R"]
             K = gt['K']
-            #print(gt['center_x'], gt['center_y'], gt['width'], gt['height'])
+            tprime = gt['tprime']
             gt_3d_kpt = gt['joints_3d_cam']
-            ref_bone_len = gt["ref_bone_len"]
+            joint_cam_normalized = gt["joint_cam_normalized"]
             xyz_rot = np.matmul(R, gt_3d_kpt.T).T
             gt_vis = gt['joints_3d_vis'].copy()
             self.test_verify_identity(n, gt_3d_kpt, gts)
             pre_2d_kpt = preds[n].copy()
-            #pre_2d_kpt[:,2] = pre_2d_kpt[:,2] - pre_2d_kpt[:,2][9] 
-            d, iscomplex = self.estimate_depth(ref_bone_len*1000, K, pre_2d_kpt)
-            #print(d)
-            #print(xyz_rot[:,2][9]*1000)
-            #print("=========-")
             _label = label_in_img_with_score[n].copy()
-            #print(pre_2d_kpt)
-            #pre_2d_kpt[:,2] = np.squeeze(pre_2d_kpt[:,2] - pre_2d_kpt[:,2][FreiHandConfig.root_idx])
-            #if np.abs(d-xyz_rot[:,2][9]*1000) > 300:
-            #    print("=================")
-            #    d1, iscomplex = self.estimate_depth(ref_bone_len*1000, K, _label, p=True)
-            #    print("----")
-            #    d, iscomplex = self.estimate_depth(ref_bone_len*1000, K, pre_2d_kpt, p=True)
-            #    print("----")
-                #print(ref_bone_len*1000)
-                #print(self.calculate_bone_length(xyz_rot))
-            #    print(np.abs(d-xyz_rot[:,2][9]*1000))
-            #    print(np.abs(d1-xyz_rot[:,2][9]*1000))
-                #print(pre_2d_kpt)
-                #print(_label)
-            pre_2d_kpt[:,2] = pre_2d_kpt[:,2] + d#xyz_rot[:,2][9]*1000
-
-            #if np.abs(d-xyz_rot[:,2][9]*1000) > 30:
-            #    continue
-            #print(xyz_rot[:,2][9]*1000)
-            #print(pre_2d_kpt[:,2] - d)
-            #print((gt_3d_kpt[:,2] - gt_3d_kpt[:,2][9])*1000)
-            _label[:,2] = _label[:,2] + xyz_rot[:,2][9]*1000
+            
             pre_3d_kpt = np.zeros((joint_num,3))
             pre_3d_kpt = augment.pixel2cam(pre_2d_kpt, K)
             pre_3d_kpt = np.matmul(R.T, pre_3d_kpt.T).T
             label_3d_kpt = np.zeros((joint_num,3))
             label_3d_kpt = augment.pixel2cam(_label, K)
             label_3d_kpt = np.matmul(R.T, label_3d_kpt.T).T
+            #pre_3d_kpt = pre_3d_kpt
+            #gt_3d_kpt = gt_3d_kpt
+            #ref_bone_len = self.calculate_bone_length(joint_cam_normalized)
+            #root_depth = xyz_rot[:,2][9]*1000
+            #pre_3d_kpt, label_3d_kpt = self.scale_result(pre_3d_kpt, method='normalize', bone_length=None, 
+            #                                             root_depth=xyz_rot[:,2][9]*1000, tprime=tprime, label_3d_kpt=label_3d_kpt)
+            # assert np.allclose(label_3d_kpt, gt_3d_kpt, rtol=1e-6, atol=1e-6)
+            #pre_3d_kpt, label_3d_kpt = self.scale_result(pre_3d_kpt, method='scale', bone_length=ref_bone_len, 
+            #                                             tprime=tprime, label_3d_kpt=label_3d_kpt)
+            ref_bone_len = gt["ref_bone_len"]
+            pre_3d_kpt, label_3d_kpt = self.scale_result(pre_3d_kpt, method='scale', bone_length=ref_bone_len, 
+                                                        tprime=tprime, label_3d_kpt=label_3d_kpt)            
+            #print(pre_3d_kpt)
+            #print(label_3d_kpt)
             #assert np.allclose(label_3d_kpt, gt_3d_kpt, rtol=1e-6, atol=1e-6)
-            #pre_3d_kpt = pre_3d_kpt - pre_3d_kpt[self.root_idx]
-            #gt_3d_kpt  = gt_3d_kpt - gt_3d_kpt[self.root_idx]
             # rigid alignment for PA MPJPE (protocol #1)
             _, pre_3d_kpt_align, T, b, c = augment.compute_similarity_transform(gt_3d_kpt, pre_3d_kpt, compute_optimal_scale=True)
 
@@ -699,29 +706,30 @@ class FreiHand:
             # error save
             p1_error[n] = np.power(pre_3d_kpt_align - gt_3d_kpt,2) # PA MPJPE (protocol #1)
             p2_error[n] = np.power(pre_3d_kpt - gt_3d_kpt,2)  # MPJPE (protocol #2)
-
-#===============================================================================
-#             img = cv2.imread(gt['image'], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
-# 
-#             #print(gt["image"])
-#             #print(uv1)
-#             #print(uv2)
-#             fig = plt.figure()
-#                 
-#             ax1 = fig.add_subplot(121)
-#             ax2 = fig.add_subplot(122)
-#             # 
-#             #ax1.imshow((255*img_patch/np.max(img_patch)).astype(np.uint8))
-#             ax1.imshow(img)
-#             ax2.imshow(img)
-#             #ax1.imshow(img2_w)
-#             # 
-#             self.plot_hand(ax1, uv1, order='uv')
-#             self.plot_hand(ax2, uv2, order='uv')
-#             ax1.axis('off')
-#             nn = str(random.randint(1,3000))
-#             plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))    
-#===============================================================================
+            #if n > 0:
+            #    break
+ #==============================================================================
+ #            img = cv2.imread(gt['image'], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+ # 
+ #            #print(gt["image"])
+ #            #print(uv1)
+ #            #print(uv2)
+ #            fig = plt.figure()
+ #                 
+ #            ax1 = fig.add_subplot(121)
+ #            ax2 = fig.add_subplot(122)
+ #            # 
+ #            #ax1.imshow((255*img_patch/np.max(img_patch)).astype(np.uint8))
+ #            ax1.imshow(img)
+ #            ax2.imshow(img)
+ #            #ax1.imshow(img2_w)
+ #            # 
+ #            self.plot_hand(ax1, uv1, order='uv')
+ #            self.plot_hand(ax2, uv2, order='uv')
+ #            ax1.axis('off')
+ #            nn = str(random.randint(1,3000))
+ #            plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))    
+ #==============================================================================
              
             #print("=================================================")
             #print(gt_3d_kpt)
@@ -784,26 +792,20 @@ class FreiHand:
         print('Dumped %d joints and %d verts predictions to %s' % (len(xyz_pred_list), len(verts_pred_list), pred_out_path))
     
     def evaluate_evaluations(self, preds_in_patch_with_score, params, result_dir):
-        #=======================================================================
-        # print(np.array(params["bone_length"]).shape)
-        # print(np.array(params["K"]).shape)
-        # print(np.array(params["img_path"]).shape)
-        # print(np.array(params["bbox"]).shape)        
-        #=======================================================================
         preds_in_img_with_score = []
         for n in range(preds_in_patch_with_score.shape[0]):
             pred = preds_in_patch_with_score[n]
             bbox = params["bbox"][n]
-            bone_length = params["bone_length"][n]
+            ref_bone_len = params["ref_bone_len"][n]
             K = params["K"][n]
             img_path = params["img_path"][n]
-            center_x = bbox[0, 0]
-            center_y = bbox[0, 1]
-            width = bbox[0, 2]
-            height = bbox[0, 3]
+            center_x = bbox[0]
+            center_y = bbox[1]
+            width = bbox[2]
+            height = bbox[3]
             trans = augment.gen_trans_from_patch_cv(center_x, center_y, width, height, cfg.input_shape[1], cfg.input_shape[0], 1.0, inv = True)
             preds_in_img_with_score.append(augment.trans_coords_from_patch_to_org_3d(pred, center_x, center_y, width, height, cfg.patch_width, cfg.patch_height, 1.0, 
-                                           trans, 1.0, 1.0, 1.0))
+                                           trans, params["tprime"][n]))
             
         preds_in_img_with_score = np.asarray(preds_in_img_with_score)
         preds = preds_in_img_with_score[:, :, 0:3]
@@ -813,50 +815,43 @@ class FreiHand:
         for n in range(sample_num):
             pre_2d_kpt = preds[n].copy()
             #print(pre_2d_kpt)
-            bone_length = params["bone_length"][n]
-            # convert to mm
-            bone_length *= 1000
-            #print(bone_length)
+            ref_bone_len = params["ref_bone_len"][n]
             K = params["K"][n]
             img_path = params["img_path"][n]
-            d, iscomplex = self.estimate_depth(bone_length, K, pre_2d_kpt)
-            if iscomplex:
-                print(d)
-            print(pre_2d_kpt)
-            pre_2d_kpt[:,2] = pre_2d_kpt[:,2] + d
-            pre_3d_kpt = np.zeros((21,3))
+            pre_3d_kpt = np.zeros((self.joint_num,3))
             pre_3d_kpt = augment.pixel2cam(pre_2d_kpt, K)
+            pre_3d_kpt, _ = self.scale_result(pre_3d_kpt, method='scale', bone_length=ref_bone_len, 
+                                              root_depth=None, tprime=None)            
+            #pre_3d_kpt = np.zeros((21,3))
+            #pre_3d_kpt = augment.pixel2cam(pre_2d_kpt, K)
             verts = np.zeros((778, 3))
-       #========================================================================
-       #      if iscomplex:
-       #          uv1, _, _ = augment.projectPoints(pre_3d_kpt, np.eye(3), K)
-       #          img = cv2.imread(img_path[0], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
-       # 
-       #          #print(gt["image"])
-       #          #print(uv1)
-       #          #print(uv2)
-       #          fig = plt.figure()
-       #                 
-       #          ax1 = fig.add_subplot(121)
-       #          ax2 = fig.add_subplot(122)
-       #          # 
-       #          #ax1.imshow((255*img_patch/np.max(img_patch)).astype(np.uint8))
-       #          ax1.imshow(img)
-       #          ax2.imshow(img)
-       #          #ax1.imshow(img2_w)
-       #          # 
-       #          self.plot_hand(ax1, uv1, order='uv')
-       #          self.plot_hand(ax2, uv1, order='uv')
-       #          ax1.axis('off')
-       #          nn = str(random.randint(1,200000))
-       #          plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
-       #          plt.close(fig)
-       #      
-       #========================================================================
+     #==========================================================================
+     #        uv1, _, _ = augment.projectPoints(pre_3d_kpt, np.eye(3), K)
+     #        img = cv2.imread(img_path, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+     # 
+     #        #print(gt["image"])
+     #        #print(uv1)
+     #        #print(uv2)
+     #        fig = plt.figure()
+     #                 
+     #        ax1 = fig.add_subplot(121)
+     #        ax2 = fig.add_subplot(122)
+     #        # 
+     #        #ax1.imshow((255*img_patch/np.max(img_patch)).astype(np.uint8))
+     #        ax1.imshow(img)
+     #        ax2.imshow(img)
+     #        #ax1.imshow(img2_w)
+     #        # 
+     #        self.plot_hand(ax1, uv1, order='uv')
+     #        self.plot_hand(ax2, uv1, order='uv')
+     #        ax1.axis('off')
+     #        nn = str(random.randint(1,200000))
+     #        plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))
+     #        plt.close(fig)
+     #==========================================================================
+              
             vertices.append(verts)
-            print(pre_3d_kpt)
             predictions.append(pre_3d_kpt)
-            sys.exit()
         np.save("evaluation_predictions", predictions)
         np.save("vertices", vertices)
         self.dump('pred.json', predictions, vertices)

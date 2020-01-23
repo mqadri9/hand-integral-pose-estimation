@@ -51,9 +51,9 @@ def main():
     params = {
         "K": [],
         "img_path": [],
-        "bone_length": [],
+        "ref_bone_len": [],
         "bbox": [],
-        #"cvimg": [],
+        "tprime": []
     }
     preds = []
     preds_in_patch_with_score = []
@@ -67,33 +67,23 @@ def main():
             hm_depth = heatmap_out.shape[-3] // FreiHandConfig.num_joints
             coord_out = softmax_integral_tensor(heatmap_out, evaluator.joint_num, hm_width, hm_height, hm_depth)
             coord_out = coord_out.cpu().numpy()
-            #print(coord_out)
             preds.append(coord_out)
-            params["bone_length"].append(data["bone_length"])
-            #params["cvimg"].append(data["cvimg"])
-            params["K"].append(np.array(data["K"]))
+            params["ref_bone_len"].append(data["ref_bone_len"])
+            params["tprime"].append(data["tprime"].cpu().detach().numpy())
+            params["K"].append(data["K"])
             params["img_path"].append(data["img_path"])
-            params["bbox"].append(np.array(data["bbox"]))
+            params["bbox"].append(data["bbox"])
             preds_in_patch_with_score.append(augment.get_joint_location_result(cfg.patch_width, cfg.patch_height, heatmap_out))
-            #if itr > 10:
-            #    break
     
     preds = np.concatenate(preds, axis=0)
     _p = np.concatenate(preds_in_patch_with_score, axis=0)
-    #print(_p.shape)
-    #_p = _p.reshape((_p.shape[0] * _p.shape[1], _p.shape[2], _p.shape[3]))
     preds_in_patch_with_score = _p[0: evaluator.num_samples]
     
-    #params["bone_length"] = np.concatenate(params["bone_length"], axis=0)
-    #params["cvimg"] = np.concatenate(params["cvimg"], axis=0)
-    #params["K"] = np.concatenate(params["K"], axis=0)
-    #params["img_path"] = np.concatenate(params["img_path"], axis=0)
-    #params["bbox"] = np.concatenate(params["bbox"], axis=0)
-    params["bone_length"] = np.array(params["bone_length"])
-    params["K"] = np.array(params["K"])
-    params["img_path"] = np.array(params["img_path"])
-    params["bbox"] = np.array(params["bbox"])
-
+    params["ref_bone_len"] = np.concatenate(params["ref_bone_len"], axis=0)
+    params["tprime"] = np.concatenate(params["tprime"], axis=0)
+    params["K"] = np.concatenate(params["K"], axis=0)
+    params["img_path"] = np.concatenate(params["img_path"], axis=0)
+    params["bbox"] = np.concatenate(params["bbox"], axis=0)
     
     evaluator._evaluate(preds_in_patch_with_score, params, cfg.result_dir) 
 

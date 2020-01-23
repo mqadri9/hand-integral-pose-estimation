@@ -38,7 +38,7 @@ class Config:
     weight_decay = 1e-5
     batch_size = 32
     test_batch_size = 32
-    eval_batch_size = 1
+    eval_batch_size = 32
     eval_version = 2
     ## model setting
     resnet_type = 50 # 18, 34, 50, 101, 152
@@ -56,11 +56,10 @@ class Config:
     use_hand_detector = False
     online_hand_detection = False
     checksession = 1
-    checkepoch = 2
-    checkpoint = 239999
-    
-    
+    checkepoch = 6
+    checkpoint = 260479
     continue_train = False
+    scaling_constant = 100
     
     def set_args(self, gpu_ids, continue_train=False):
         self.gpu_ids = gpu_ids

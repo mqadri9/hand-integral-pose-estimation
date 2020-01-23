@@ -108,7 +108,7 @@ class Trainer(Base):
 
         self.joint_num = trainset_loader.joint_num[0]
         self.itr_per_epoch = math.ceil(trainset_loader.__len__() / self.cfg.num_gpus / self.cfg.batch_size)
-        self.batch_generator = batch_generator       
+        self.batch_generator = batch_generator
         
     def _make_model(self):
         # prepare network
@@ -167,7 +167,6 @@ class Tester(Base):
         ckpt = torch.load(model_path)
         model.load_state_dict(ckpt['network'])
         model.eval()
-
         self.model = model
 
     def _evaluate(self, preds, label_list, augmentation_list, result_save_path):
@@ -183,7 +182,7 @@ class Evaluator(Base):
     def _make_batch_generator(self):
         # data load and construct batch generator
         self.logger.info("Creating dataset...")
-        evaluationset = eval(self.cfg.testset)("evaluation")
+        evaluationset = eval(self.cfg.testset)("evaluation", is_eval=True)
         evaluationset_loader = DatasetLoader(evaluationset, 
                                              False, 
                                              transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=cfg.pixel_mean, std=cfg.pixel_std)]),

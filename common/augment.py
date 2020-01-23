@@ -174,16 +174,13 @@ def trans_coords_from_patch_to_org(coords_in_patch, c_x, c_y, bb_width, bb_heigh
     return coords_in_org
 
 
-def trans_coords_from_patch_to_org_3d(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, scale, trans, zoom_factor, z_mean, f):
+def trans_coords_from_patch_to_org_3d(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, scale, trans, tprime):
     res_img = trans_coords_from_patch_to_org(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, trans)
-    zoom_factor = max(bb_width, bb_height)
+    #zoom_factor = max(bb_width, bb_height)
     #res_img[:, 2] = (coords_in_patch[:, 2] / cfg.patch_width) * cfg.bbox_3d_shape[0] * scale
-    #print(coords_in_patch[:, 2])
-    #print(scale)
-    #print(cfg.patch_width)
-    #print(coords_in_patch)
-    res_img[:, 2] = coords_in_patch[:, 2] / cfg.patch_width * (zoom_factor * scale)
+    #res_img[:, 2] = coords_in_patch[:, 2] / cfg.patch_width * (zoom_factor * scale)
     #res_img[:, 2] = (coords_in_patch[:, 2] * cfg.patch_width * z_mean) / (zoom_factor * f)
+    res_img[:, 2] = coords_in_patch[:, 2] + tprime
     return res_img
 
 # helper functions
@@ -307,11 +304,9 @@ def find_bb_hand_detector(img_path, hand_detector, aspect_ratio=1.0):
     center_y = (y1 + y2) // 2
     bb_width = x2 - x1
     bb_height = y2 - y1
-
-    bbox = scale_bb(bbox, aspect_ratio=aspect_ration)
-    
+    bbox = np.array([center_x, center_y, bb_width, bb_height])
+    bbox = scale_bb(bbox, aspect_ratio=aspect_ratio)
     return bbox
-
 
 def scale_bb(bbox, aspect_ratio=1.0):
     center_x = bbox[0]
@@ -356,20 +351,34 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
             bbox = faster_rcnn_bbox
     else:
         bbox = find_bb(uv, joint_vis)
+
+    # Draw a bounding box around the projected points 
+    # bbox is the scaled bounding box + padding has been applied it
+    # Find the maximum height and width 
+    L = max(bbox[2], bbox[3])
+    # L would is the our projected high
+    if L == bbox[2]:
+        # multiply by a 100 to increase the value ranges of joint_cam_normalized at line 375
+        # so basically scale the hand to be a constant length of 100 instead of 1
+        tprime = cfg.scaling_constant * K[0, 0] / L
+    else: 
+        tprime = cfg.scaling_constant * K[1, 1] / L
     
+    joint_cam_normalized = joint_cam * tprime/z[9]
+    # joint_cam_normalized is the  new 3D groundthruth
+    
+    uv_scaled, z_scaled, xyz_rot_scaled = projectPoints(joint_cam_normalized, R, K)
     joint_img = np.zeros((FreiHandConfig.num_joints, 3))
-    joint_img[:,0] = uv[:,0]
-    joint_img[:,1] = uv[:,1]
+    joint_img[:,0] = uv_scaled[:,0]
+    joint_img[:,1] = uv_scaled[:,1]
     # Root centered
-    z_mean = np.mean(z)
-    joint_img[:,2] = np.squeeze(z - z[FreiHandConfig.root_idx])
-        
+    #joint_img[:,2] = np.squeeze(z_scaled - z_scaled[FreiHandConfig.root_idx])
+    joint_img[:,2] = np.squeeze(z_scaled - tprime)
+    
     bb_c_x = float(bbox[0])
     bb_c_y = float(bbox[1])
     bb_width = float(bbox[2])
     bb_height = float(bbox[3])
-    zoom_factor = cfg.patch_width/(bb_width * scale)
-    f = min(K[0,0], K[1,1])
     trans = gen_trans_from_patch_cv(bb_c_x, bb_c_y, bb_width, bb_height, cfg.input_shape[1], cfg.input_shape[0], scale, inv=inv)
     img_patch = cv2.warpPerspective(img2_w, trans, (int(cfg.input_shape[1]), int(cfg.input_shape[0])), flags=cv2.INTER_LINEAR)
     #print("img path before transformation")
@@ -381,7 +390,7 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
     #print("img patch after transformation")
     #print(img_patch.shape)
     #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), cv2.cvtColor(img_patch, cv2.COLOR_RGB2BGR))
-    return img_patch, trans, joint_img, joint_img_orig, joint_vis, xyz_rot, bbox, zoom_factor, f, z_mean    
+    return img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime 
 
 def rotate_2d(pt_2d, rot_rad):
     x = pt_2d[0]
