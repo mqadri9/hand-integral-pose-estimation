@@ -10,9 +10,9 @@ import numpy as np
 
 def parse_args():
 	parser = argparse.ArgumentParser()
-	add_train_args(parser)		
-	# parser.add_argument('--pts_num', type=int, default=21, help='number of keypoints in each sample')
+	add_train_args(parser)
 	parser.add_argument('--regressor_output', type=str, help='regressor output npy file')
+	parser.add_argument('--predicted_PANet_path', type=str, help='path at which the predicted PANet output is stored')
 	args = parser.parse_args()
 	return args
 
@@ -22,7 +22,7 @@ def computeMPJPE(pred, gt):
 class NRSfM_learner(TrainKernel):
 
 	def __init__(self,
-				 pts_num=21,				 
+				 pts_num=21,
 				 code_sparsity_weight=0,
 				 encode_with_relu=1):
 		super(NRSfM_learner, self).__init__()
@@ -85,8 +85,8 @@ def PANet_reconstruction(regressor_output):
 		test_kernel = NRSfM_tester(pts_num=pts_num)
 
 		pts_recon_ts, pts_recon_canonical_ts, camera_matrix_ts, code_ts = predict_batch_main(test_data, test_kernel, args)
-		
-		loss_mpjpe = computeMPJPE(pts_recon_ts.to("cuda"), test_data[0])		
+
+		loss_mpjpe = computeMPJPE(pts_recon_ts.to("cuda"), test_data[0])
 
 		pts_recon_PANet = pts_recon_ts.data.cpu().numpy()
 
@@ -98,24 +98,11 @@ if __name__ == '__main__':
 	regressor_output = np.load(args.regressor_output)
 	out_pts, loss_mpjpe = PANet_reconstruction(regressor_output)
 
+	### `out_pts` above is the predicted reconstruction from trained PANet ###
+	### It is saved as `pred_PANet.npy` at logs/hand_pa/pred_PANet.npy ###
+	np.save(args.predicted_PANet_path, out_pts)
+
 	print("Shape of output: ", out_pts.shape)
 	print("MPJPE loss of pred: ", loss_mpjpe)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	print("The predicted PANet output is stored at %s" % args.predicted_PANet_path)
 

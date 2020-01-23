@@ -31,7 +31,7 @@ CUDA_VISIBLE_DEVICES=$1 nice -10 python3 ../train.py --mode=train \
 	--augmentation=$data_augmentation \
 	--aug_rotate_val=$aug_rotate_val \
 	--lr_decay_step=100000 \
-	--maxitr=1000000 \
+	--maxitr=500000 \
 	--seed_id=$seed_id \
 	--ae_config=$ae_config \
 	--weight=$weight \
