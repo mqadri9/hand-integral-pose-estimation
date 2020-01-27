@@ -35,17 +35,13 @@ class NRSfM_learner(TrainKernel):
 		elif ae_config == 2:
 			dict_size_list = [125, 115, 104, 94, 83, 73, 62, 52, 41, 31, 20, 10]
 		elif ae_config == 3:
-			# dict_size_list = [128, 64, 32, 16, 4, 2]					# Old
-			dict_size_list = [1024, 512, 256, 128, 64, 32, 16, 8]		# New
+			dict_size_list = [128, 64, 32, 16, 4, 2]
 		elif ae_config == 4:
-			# dict_size_list = [128, 100, 64, 50, 32, 16, 8, 4]			# Old
-			dict_size_list = [128, 100, 64, 50, 32, 16, 8]				# New
+			dict_size_list = [128, 100, 64, 50, 32, 16, 8, 4]
 		elif ae_config == 5:
-			# dict_size_list = [128, 100, 64, 50, 32, 16, 8, 4, 2]		# Old
-			dict_size_list = [128, 100, 64, 50, 32, 16, 8, 6]			# New
+			dict_size_list = [128, 100, 64, 50, 32, 16, 8, 4, 2]
 		elif ae_config == 6:
-			# dict_size_list = [38, 128, 100, 64, 50, 32, 16, 8, 4, 2]	# Old
-			dict_size_list = [38, 128, 100, 64, 50, 32, 16, 8, 6]		# New
+			dict_size_list = [38, 128, 100, 64, 50, 32, 16, 8, 6]
 		elif ae_config == 7:
 			dict_size_list = [2048, 1024, 512, 256, 128, 115, 104, 94, 83, 73, 62, 52, 41, 31, 20, 10, 16, 8]
 		elif ae_config == 8:
@@ -87,14 +83,14 @@ class NRSfM_learner(TrainKernel):
 		loss_sparsity = code.abs().sum(-1).mean()
 		loss_recon = frobenius_norm_loss(pts_recon, pts_3d)
 
-		loss_mpjpe = computeMPJPE(pts_recon, pts_3d)		
+		loss_mpjpe = computeMPJPE(pts_recon, pts_3d)
 
 		loss = loss_recon + self.code_sparsity_weight * loss_sparsity
 
 		log_dict = {}
 		if do_log_scalar:
 			log_scalar = dict(
-				mpjpe = loss_mpjpe.data.cpu().numpy(),				
+				mpjpe = loss_mpjpe.data.cpu().numpy(),
 				error = loss_recon.data.cpu().numpy(),
 				loss = loss.data.cpu().numpy(),
 				loss_recon = loss_recon.data.cpu().numpy(),
@@ -107,12 +103,12 @@ class NRSfM_learner(TrainKernel):
 class NRSfM_tester(NRSfM_learner):
 
 	def forward(self, input):
-		pts_recon, pts_recon_canonical, camera_matrix, code = self.predict(input)		
-		return pts_recon, pts_recon_canonical, camera_matrix, code		
+		pts_recon, pts_recon_canonical, camera_matrix, code = self.predict(input)
+		return pts_recon, pts_recon_canonical, camera_matrix, code
 
-def load_hand_data(localdir):
-	f_train = os.path.join(localdir, 'hand_train.npy')
-	f_test = os.path.join(localdir, 'hand_test.npy')
+def load_data(localdir):
+	f_train = os.path.join(localdir, 'train.npy')
+	f_test = os.path.join(localdir, 'test.npy')
 	data_file_list = [f_train, f_test]
 	data_list = []
 	for file in data_file_list:
@@ -133,22 +129,15 @@ def load_dataset_to_gpu(data):
 		torch.from_numpy(data['mask']).float().cuda())
 	return data_cuda
 
-def load_dataset(dataset_id, localdir):
-	if dataset_id == 'hand':
-		train_data, validation_data = load_hand_data(localdir)
+def load_dataset(localdir):
 
+	train_data, validation_data = load_data(localdir)
 	train_data_cuda = load_dataset_to_gpu(train_data)
-	validation_data_cupa = load_dataset_to_gpu(validation_data)
-	return train_data_cuda, validation_data_cupa
+	validation_data_cuda = load_dataset_to_gpu(validation_data)
+	return train_data_cuda, validation_data_cuda
 
-def load_test_dataset(dataset_id, localdir):
-	if dataset_id.startswith('hand'):
-		train_data, validation_data = load_hand_data(localdir)
-
-		if dataset_id == 'hand_train':
-			test_data = train_data
-		else:
-			test_data = validation_data
+def load_test_dataset(localdir):
+	_, test_data = load_data(localdir)
 	test_data_cuda = load_dataset_to_gpu(test_data)
 	return test_data_cuda
 
@@ -156,7 +145,6 @@ def parse_args():
 	parser = argparse.ArgumentParser()
 	add_train_args(parser)
 	parser.add_argument('--mode', type=str, default='eval', help='mode: train, eval(default), mining')
-	parser.add_argument('--dataset_id', type=str, help='picks dataset')
 	parser.add_argument('--weight', type=float, default=0, help='code sparsity loss weight')
 	parser.add_argument('--ae_config', type=int, default=0, help='dictionary configuration')
 	parser.add_argument('--pts_num', type=int, default=21, help='number of keypoints for each sample')
@@ -168,9 +156,9 @@ def parse_args():
 	return args
 
 def train(args):
-	""" Create training data on CUDA """	
-	train_data, validation_data = load_dataset(args.dataset_id, args.localdir)
-	pts_num = train_data[0].shape[1]	
+	""" Create training data on CUDA """
+	train_data, validation_data = load_dataset(args.localdir)
+	pts_num = train_data[0].shape[1]
 	train_kernel = NRSfM_learner(
 		code_sparsity_weight = args.weight,
 		pts_num = pts_num,
@@ -180,7 +168,7 @@ def train(args):
 
 def test(args):
 	with torch.no_grad():
-		test_data =load_test_dataset(args.dataset_id, args.localdir)
+		test_data =load_test_dataset(args.localdir)
 		pts_num = test_data[0].shape[1]
 
 		test_kernel = NRSfM_tester(pts_num=pts_num,
@@ -192,7 +180,7 @@ def test(args):
 
 		pts_recon = pts_recon_ts.data.cpu().numpy()
 
-	output_file = os.path.join(args.logdir, 'pred_%s.npz'%args.dataset_id)
+	output_file = os.path.join(args.logdir, 'predicted.npz')
 	np.savez(output_file, pts=pts_recon)
 
 if __name__ == '__main__':

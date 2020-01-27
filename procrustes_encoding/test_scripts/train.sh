@@ -12,8 +12,12 @@ fix_split_flag=1
 
 
 encode_with_relu=1
+
 data_augmentation=1
-aug_rotate_val=0.52
+aug_rotate_val=0.26
+
+augment_with_scale=0
+aug_scale_sigma_val=0.20
 
 python3 ../data_splitting.py --datadir=$datadir \
 							 --train_split_proportion=$datasplit_ratio \
@@ -29,6 +33,8 @@ CUDA_VISIBLE_DEVICES=$1 nice -10 python3 ../train.py --mode=train \
 	--print_freq=50 \
 	--encode_with_relu=$encode_with_relu \
 	--augmentation=$data_augmentation \
+	--augment_with_scale=$augment_with_scale \
+	--aug_scale_sigma_val=$aug_scale_sigma_val \
 	--aug_rotate_val=$aug_rotate_val \
 	--lr_decay_step=100000 \
 	--maxitr=500000 \

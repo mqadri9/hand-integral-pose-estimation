@@ -44,7 +44,7 @@ class TrainKernel(torch.nn.Module):
 
 
 def array2im(input):
-	
+
 	# first, normalize the array
 	xmin = input.min()
 	xmax = input.max()
@@ -101,7 +101,7 @@ def MatAngleAxisToR(angle_axis):
         k_one = torch.ones_like(rx)
         rotation_matrix = torch.cat(
             [k_one, -rz, ry, rz, k_one, -rx, -ry, rx, k_one], dim=1)
-        return rotation_matrix.view(-1, 3, 3)    
+        return rotation_matrix.view(-1, 3, 3)
 
     _angle_axis = torch.unsqueeze(angle_axis, dim=1)
     theta2 = torch.matmul(_angle_axis, _angle_axis.transpose(1, 2))
@@ -117,9 +117,9 @@ def MatAngleAxisToR(angle_axis):
     mask_pos = (mask).type_as(theta2)
     mask_neg = (mask == False).type_as(theta2)  # noqa
 
-    # create output pose matrix    
+    # create output pose matrix
     batch_size = angle_axis.shape[0]
-    rotation_matrix = torch.zeros(batch_size, 3, 3, device='cuda:0')    
+    rotation_matrix = torch.zeros(batch_size, 3, 3, device='cuda:0')
     rotation_matrix = torch.eye(3).to(angle_axis.device).type_as(angle_axis)
     rotation_matrix = rotation_matrix.view(1, 3, 3).repeat(batch_size, 1, 1)
     # fill output matrix with masked values
@@ -156,8 +156,10 @@ def add_train_args(arg_parser):
 	arg_parser.add_argument('--encode_with_relu', type=int, default=1, help='choose between ReLU or BST for encoder')
 
 	# option to augment the data
-	arg_parser.add_argument('--augmentation', type=int, default=0, help='option to augment the data by rotating roll, pitch, yaw')
+	arg_parser.add_argument('--augmentation', type=int, default=1, help='option to augment the data by rotating roll, pitch, yaw')
 	arg_parser.add_argument('--aug_rotate_val', type=float, default=0.15, help='augment the data by rotating with the following radians')
+	arg_parser.add_argument('--augment_with_scale', type=int, default=0, help='option to augment the data by scaling randomly')
+	arg_parser.add_argument('--aug_scale_sigma_val', type=float, default=0.2, help='sigma val for scaling')
 
 
 def evaluate_validation_set(validation_data_loader, train_kernel):
@@ -403,14 +405,19 @@ def train_batch_main(train_data, train_kernel, validation_data, args):
 		else:
 			train_minbatch_data = train_data
 
-		if (args.augmentation == 1):			
-			#angles = args.aug_rotate_val*np.random.randn(args.bsize, 3)
-			angles = np.random.randn(args.bsize, 3) * (args.aug_rotate_val + args.aug_rotate_val) + args.aug_rotate_val
+		if (args.augmentation == 1):
+			angles = args.aug_rotate_val*np.random.randn(args.bsize, 3)
+			# angles = np.random.randn(args.bsize, 3) * (args.aug_rotate_val + args.aug_rotate_val) + args.aug_rotate_val
 			angles = torch.from_numpy(angles)
 			R = MatAngleAxisToR(angles)
 			R = R.cuda().float()
 			train_minbatch_data = list(train_minbatch_data)
 			train_minbatch_data[0] = torch.matmul(train_minbatch_data[0], R)
+			if (args.augment_with_scale == 1):
+				aug_scale = args.aug_scale_sigma_val * np.random.randn(args.bsize, 1) + 1
+				aug_scale = torch.from_numpy(aug_scale)
+				aug_scale = aug_scale.cuda().float()
+				train_minbatch_data[0] = train_minbatch_data[0] * aug_scale[:,None]
 			train_minbatch_data = tuple(train_minbatch_data)
 
 		optimizer.zero_grad()
@@ -489,7 +496,7 @@ def train_composite_model(train_data, train_kernel, composite_kernel_constructor
 
 
 def predict_batch_main(test_data, test_kernel, args):
-	
+
 	test_kernel.load_model(args.pretrain_model)
 	test_kernel.cuda()
 
