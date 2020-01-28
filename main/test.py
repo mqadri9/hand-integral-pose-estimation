@@ -68,11 +68,11 @@ def main():
         'tprime': []
     }
     with torch.no_grad():
-        for itr, (img_patch, label, label_weight, params) in enumerate(tqdm(tester.batch_generator)):
+        for itr, (img_patch, params) in enumerate(tqdm(tester.batch_generator)):
             img_patch = img_patch.cuda()
             img_patch_sav = np.copy(img_patch[0].permute(1, 2, 0).cpu().detach().numpy())
-            label = label.cuda()
-            label_weight = label_weight.cuda()
+            label = params["label"].cuda()
+            label_weight = params["label_weight"].cuda()
             center_x = params["bbox"][0].cuda()
             center_y = params["bbox"][1].cuda()
             width = params["bbox"][2].cuda()
@@ -89,8 +89,8 @@ def main():
             if cfg.num_gpus > 1:
                 heatmap_out = gather(heatmap_out,0)
             JointLocationLoss = tester.JointLocationLoss(heatmap_out, label, label_weight)
-            JointLocationLoss2 = tester.JointLocationLoss2(heatmap_out, label, label_weight, joint_cam, joint_cam_normalized, center_x,
-                                                           center_y, width, height, scale, R, trans, K, tprime)
+            #JointLocationLoss2 = tester.JointLocationLoss2(heatmap_out, label, label_weight, joint_cam, joint_cam_normalized, center_x,
+            #                                               center_y, width, height, scale, R, trans, K, tprime)
             loss1 = JointLocationLoss.detach()
             #===================================================================
             # if loss1 > 10:
