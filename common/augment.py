@@ -11,6 +11,7 @@ from FreiHand_config import FreiHandConfig
 from nets.loss import softmax_integral_tensor
 import matplotlib.pyplot as plt
 import pdb
+torch.set_printoptions(precision=10)
 
 plt.switch_backend('agg')
 
@@ -82,20 +83,43 @@ def projectPoints(xyz, R, K):
     K = np.array(K)
     xyz_rot = np.matmul(R, xyz.T).T
     uv = np.matmul(K, xyz_rot.T).T
+    #print(xyz_rot[:, -1])
     return uv[:, :2] / uv[:, -1:], xyz_rot[:, -1]*1000, xyz_rot
 
-def pixel2cam(pixel_coord, K):
-
+def pixel2cam(pixel_coord, K, pp=False):
+    if pp:
+        print("pixel_coord")
+        print(pixel_coord)
     uv = np.ones(pixel_coord.shape)
     uv[:, 0] = pixel_coord[:, 0]
     uv[:, 1] = pixel_coord[:, 1]
+    if pp:
+        print("uv")
+        print(uv)
     xyz = np.matmul(np.linalg.inv(K), uv.T).T
     pixel_coord[..., 2] = pixel_coord[..., 2]/1000
     xyz *= np.expand_dims(pixel_coord[..., 2], axis=1)
     
     return xyz
 
+
+def pixel2cam_torch(pixel_coord, K, pp=False):
+    if pp:
+        print(pixel_coord)
+    uv = torch.ones(pixel_coord.shape)
+    uv = uv.double().cuda()
+    uv[:, 0] = pixel_coord[:, 0]
+    uv[:, 1] = pixel_coord[:, 1]
+    if pp:
+        print(uv)
+        print("============")
+    xyz = torch.transpose(torch.matmul(K.inverse(), torch.transpose(uv, 0, 1)), 0, 1)
+    pixel_coord[:, 2] = pixel_coord[:, 2]/1000
+    xyz = xyz*pixel_coord[:, 2].unsqueeze(1)
+    #xyz *= np.expand_dims(pixel_coord[:, 2], axis=1)
     
+    return xyz
+   
 def load_db_annotation(base_path, data_split=None):
     if data_split is None:
         # only training set annotations are released so this is a valid default choice
@@ -160,26 +184,35 @@ def get_joint_location_result(patch_width, patch_height, preds):
     return coords
 
 def test_get_joint_loc_res(label):
-    label = label.astype(float)
-    label = label.reshape((label.shape[0], int(label.shape[1] / 3), 3))
+    # If type is torch assume that already reshaped to correct format
+    if type(label) is np.ndarray:
+        label = label.astype(float)
+        label = label.reshape((label.shape[0], int(label.shape[1] / 3), 3))
     label[:, :, 0] = (label[:, :, 0] + 0.5) * cfg.patch_width
     label[:, :, 1] = (label[:, :, 1] + 0.5) * cfg.patch_height
     label[:, :, 2] = label[:, :, 2] * cfg.patch_width
     return label   
 
 def trans_coords_from_patch_to_org(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, trans):
-    coords_in_org = coords_in_patch.copy()
-    for p in range(coords_in_patch.shape[0]):
-        coords_in_org[p, 0:2] = trans_point2d(coords_in_patch[p, 0:2], trans)
+    if type(coords_in_patch) is np.ndarray:
+        coords_in_org = coords_in_patch.copy()
+        for p in range(coords_in_patch.shape[0]):
+            coords_in_org[p, 0:2] = trans_point2d(coords_in_patch[p, 0:2], trans)
+    else:
+        coords_in_org = coords_in_patch.clone()
+        for p in range(coords_in_patch.shape[0]):
+            coords_in_org[p, 0:2] = trans_point2d_torch(coords_in_patch[p, 0:2], trans)
     return coords_in_org
 
 
-def trans_coords_from_patch_to_org_3d(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, scale, trans, tprime):
+def trans_coords_from_patch_to_org_3d(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, scale, trans, tprime, p=False):
     res_img = trans_coords_from_patch_to_org(coords_in_patch, c_x, c_y, bb_width, bb_height, patch_width, patch_height, trans)
     #zoom_factor = max(bb_width, bb_height)
     #res_img[:, 2] = (coords_in_patch[:, 2] / cfg.patch_width) * cfg.bbox_3d_shape[0] * scale
     #res_img[:, 2] = coords_in_patch[:, 2] / cfg.patch_width * (zoom_factor * scale)
     #res_img[:, 2] = (coords_in_patch[:, 2] * cfg.patch_width * z_mean) / (zoom_factor * f)
+    #if p:
+    #    print(res_img)
     res_img[:, 2] = coords_in_patch[:, 2] + tprime
     return res_img
 
@@ -204,8 +237,8 @@ def get_aug_config():
     scale_factor = 0.25
     color_factor = 0.2
     
-    scale = np.clip(np.random.randn(), -1.0, 1.0) * scale_factor + 1.0
-    #scale = 1.0
+    #scale = np.clip(np.random.randn(), -1.0, 1.0) * scale_factor + 1.0
+    scale = 1.0
     #rot = np.clip(np.random.randn(), -2.0,
     #              2.0) * rot_factor if random.random() <= 0.6 else 0
     rot = sample_rotation_matrix()
@@ -323,6 +356,7 @@ def scale_bb(bbox, aspect_ratio=1.0):
     return [center_x, center_y, bb_width, bb_height]    
 
 def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=False, hand_detector=None, img_path=None, return_bbox=True, faster_rcnn_bbox=None):
+    #print("INSIDE GENERATE_PATCH_IMAGE")
     img = cvimg.copy()
     img_height, img_width, img_channels = img.shape
     
@@ -363,18 +397,26 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
         tprime = cfg.scaling_constant * K[0, 0] / L
     else: 
         tprime = cfg.scaling_constant * K[1, 1] / L
-    
     joint_cam_normalized = joint_cam * tprime/z[9]
     # joint_cam_normalized is the  new 3D groundthruth
-    
     uv_scaled, z_scaled, xyz_rot_scaled = projectPoints(joint_cam_normalized, R, K)
     joint_img = np.zeros((FreiHandConfig.num_joints, 3))
+    #print(joint_cam_normalized)
     joint_img[:,0] = uv_scaled[:,0]
     joint_img[:,1] = uv_scaled[:,1]
     # Root centered
     #joint_img[:,2] = np.squeeze(z_scaled - z_scaled[FreiHandConfig.root_idx])
+    # vv = joint_cam_normalized.copy()
+
+    #===========================================================================
+    # vv[:,2] = np.squeeze(vv[:,2] - tprime)
+    # print(vv)
+    # print(tprime)
+    #===========================================================================
+    #print("joint_cam_normalized")
+    #joint_img[:,2] = z_scaled
     joint_img[:,2] = np.squeeze(z_scaled - tprime)
-    
+
     bb_c_x = float(bbox[0])
     bb_c_y = float(bbox[1])
     bb_width = float(bbox[2])
@@ -457,7 +499,69 @@ def trans_point2d(pt_2d, trans):
     dst_pt = np.dot(trans, src_pt)
     return dst_pt[0:2]
 
+def trans_point2d_torch(pt_2d, trans):
+    #src_pt = torch.cuda.DoubleTensor([pt_2d[0], pt_2d[1], 1.].T)
+    src_pt = torch.from_numpy(np.array([pt_2d[0].item(), pt_2d[1].item(), 1.]).T).double().cuda()
+    dst_pt = torch.matmul(trans, src_pt)
+    return dst_pt[0:2]
 
+def generate_input_unlabelled(cvimg, R, scale, data):
+    if cfg.online_hand_detection:
+        bbox = augment.find_bb_hand_detector(data['img_path'])
+    else:
+        bbox = data["faster_rccn_bbox"]
+    K = data["K"]
+    center_x = bbox[0]
+    center_y = bbox[1]
+    bb_width = bbox[2]
+    bb_height = bbox[3]
+    homo = K.dot(R).dot(np.linalg.inv(K))
+    #dst_w, dst_h = find_perspective_bounds(homo, cvimg)
+    img2_w = cv2.warpPerspective(cvimg, homo, (cvimg.shape[1], cvimg.shape[0]))
+    trans = gen_trans_from_patch_cv(center_x, center_y, bb_width, bb_height, cfg.input_shape[1], cfg.input_shape[0], scale, inv = False)
+    img_patch = cv2.warpPerspective(img2_w, trans, (int(cfg.input_shape[1]), int(cfg.input_shape[0])), flags=cv2.INTER_LINEAR)
+    # Swap first and last columns # BGR to RGB
+    img_patch = img_patch[:,:,::-1].copy()
+    img_patch = img_patch.astype(np.float32)
+    L = max(bbox[2], bbox[3])
+    K = data["K"]
+    if L == bbox[2]:
+        # multiply by a scaling_constant to increase the value ranges of joint_cam_normalized at line 375
+        # so basically scale the hand to be a constant length of scaling_constant instead of 1
+        tprime = cfg.scaling_constant * K[0, 0] / L
+    else: 
+        tprime = cfg.scaling_constant * K[1, 1] / L
+    params = {
+        "K": data["K"],
+        "ref_bone_len": data["ref_bone_len"],
+        "img_path": data["img_path"],
+        "bbox": np.array([center_x, center_y, bb_width, bb_height]),
+        "tprime": tprime,
+        "tprime_torch": torch.from_numpy(np.array([tprime])),
+        "labelled": False
+    }
+    return img_patch, params
+
+def prepare_panet_input(input, tprime, trans, bbox, K, R, scale, p=False):
+    tmp = test_get_joint_loc_res(input)  
+    result = []
+    for n_sample in range(len(tmp)):
+        t = gen_trans_from_patch_cv(bbox[n_sample, 0], bbox[n_sample, 1], bbox[n_sample, 2], bbox[n_sample, 3], 
+                                        cfg.input_shape[1], cfg.input_shape[0], scale[n_sample], inv = True)
+        t = torch.cuda.DoubleTensor(t)
+        transformed = trans_coords_from_patch_to_org_3d(tmp[n_sample], bbox[n_sample, 0],
+                                                        bbox[n_sample, 1], bbox[n_sample, 2],
+                                                        bbox[n_sample, 3], cfg.patch_width, cfg.patch_height, scale[n_sample], 
+                                                        t, tprime[n_sample], p=False)
+        transformed = pixel2cam_torch(transformed, K[n_sample], pp=p)
+        transformed = torch.transpose(torch.matmul(torch.transpose(R[n_sample], 0, 1), 
+                                                   torch.transpose(transformed, 0, 1)), 0, 1)
+        #transformed[:, 2] = transformed[:, 2] -  tprime[n_sample]
+        result.append(transformed)
+    result = torch.stack(result).to(dtype=torch.float).cuda()
+    result = result - result.mean(1, keepdims=True)
+    return result
+    
 #===============================================================================
 # def projectPoints(xyz, R, K):
 #     """ Project 3D coordinates into image space. """

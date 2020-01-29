@@ -5,12 +5,17 @@ from torch.nn import functional as F
 from config import cfg
 from FreiHand_config import FreiHandConfig
 import augment
+import config_panet
 
 def _assert_no_grad(tensor):
     assert not tensor.requires_grad, \
         "nn criterions don't compute the gradient w.r.t. targets - please " \
         "mark these tensors as not requiring gradients"
 
+def _assert_grad(tensor):
+    assert tensor.requires_grad, \
+        "Make sure that grad is set to true for this tensor"
+        
 def generate_3d_integral_preds_tensor(heatmaps, num_joints, x_dim, y_dim, z_dim):
     assert isinstance(heatmaps, torch.Tensor)
     heatmaps = heatmaps.reshape((heatmaps.shape[0], num_joints, z_dim, y_dim, x_dim))
@@ -47,7 +52,21 @@ def softmax_integral_tensor(preds, num_joints, hm_width, hm_height, hm_depth):
     z = z / float(hm_depth) - 0.5
     preds = torch.cat((x, y, z), dim=2) # preds is now of shape batch_size x 21 x 3
     preds = preds.reshape((preds.shape[0], num_joints * 3)) # preds is of shape batch_size x 63
-    return preds
+    return preds    
+
+class ParallelSoftmaxIntegralTensor(nn.Module):
+    def __init__(self):
+        super(ParallelSoftmaxIntegralTensor, self).__init__()
+        self.size_average = True    
+    def forward(self, heatmap_out, gt_coord):
+        joint_num = int(gt_coord.shape[1]/3)
+        #print(heatmap_out.shape)
+        hm_width = heatmap_out.shape[-1]
+        hm_height = heatmap_out.shape[-2]
+        hm_depth = heatmap_out.shape[-3] // FreiHandConfig.num_joints
+        coord_out = softmax_integral_tensor(heatmap_out, joint_num, hm_width, hm_height, hm_depth)        
+        return coord_out
+
 
 class JointLocationLoss(nn.Module):
     def __init__(self):
@@ -65,17 +84,87 @@ class JointLocationLoss(nn.Module):
         
         _assert_no_grad(gt_coord)
         _assert_no_grad(gt_vis)
-
-        #print(coord_out)
-        #print(gt_coord)
+        
         loss = torch.abs(coord_out - gt_coord) * gt_vis
-        #tmp = (coord_out - gt_coord) * gt_vis
-        #loss = tmp ** 2
-        #print(loss.shape)
+
         if self.size_average:
             return loss.sum() / len(coord_out)
         else:
             return loss.sum()
+        
+def computeMPJPE(pred, gt):
+    return (pred - gt).norm(dim=2).mean(-1).mean()
+
+ 
+class CombinedLoss(nn.Module):
+    def __init__(self):
+        super(CombinedLoss, self).__init__()
+        self.size_average = True
+    
+    def forward(self, heatmap_out, coord_out_teacher, gt_coord, gt_vis, labelled, tprime, trans, bbox, K, R, scale, 
+                joint_cam_normalized, nrsfm_tester):
+        #=======================================================================
+        # print("====================================")
+        # print(heatmap_out.shape)
+        # 
+        # print(coord_out_teacher.shape)
+        # print(gt_coord.shape)
+        # print(gt_vis.shape)
+        # print(labelled.shape)  
+        # print("=====================")
+        #=======================================================================
+        
+        joint_num = int(gt_coord.shape[1]/3)
+        hm_width = heatmap_out.shape[-1]
+        hm_height = heatmap_out.shape[-2]
+        hm_depth = heatmap_out.shape[-3] // FreiHandConfig.num_joints
+        coord_out = softmax_integral_tensor(heatmap_out, joint_num, hm_width, hm_height, hm_depth)
+        
+        num_unsupervised_samples = coord_out[~labelled].shape[0]
+        num_supervised_samples = coord_out[labelled].shape[0]
+        coord_out_teacher = torch.squeeze(coord_out_teacher, dim=0)
+        loss_unsupervised = 0.0
+        loss_supervised = 0.0
+        if(num_unsupervised_samples > 0):
+            input_to_panet = coord_out[~labelled].reshape((coord_out[~labelled].shape[0], FreiHandConfig.num_joints, 3))
+            input_to_panet = augment.prepare_panet_input(input_to_panet, tprime[~labelled], trans[~labelled], bbox[~labelled], 
+                                                         K[~labelled], R[~labelled], scale[~labelled])
+            panet_output, pts_recon_canonical, camera_matrix, code = nrsfm_tester.forward(input_to_panet)
+            panet_output = panet_output.reshape(panet_output.shape[0], FreiHandConfig.num_joints * 3)
+            #panet_output = torch.tensor(panet_output, requires_grad=True).cuda() # delete
+            _assert_grad(panet_output)
+            coord_out_reshaped =  coord_out.reshape(coord_out.shape[0], FreiHandConfig.num_joints,  3)
+            coord_out_reshaped = coord_out_reshaped - coord_out_reshaped.mean(1, keepdims=True)
+            coord_out_reshaped = coord_out_reshaped.reshape(coord_out_reshaped.shape[0], FreiHandConfig.num_joints * 3)
+            Lteacher = (torch.abs(coord_out[~labelled] - coord_out_teacher[~labelled])) * gt_vis[~labelled]
+            LPanet = (cfg._lambda * torch.abs(coord_out_reshaped[~labelled] - panet_output)) * gt_vis[~labelled]
+            #loss_unsupervised = (torch.abs(coord_out[~labelled] - coord_out_teacher[~labelled]) + 
+            #                     cfg._lambda * torch.abs(coord_out_reshaped[~labelled] - panet_output)) * gt_vis[~labelled]
+            loss_unsupervised = LPanet + Lteacher
+            if self.size_average:
+                loss_unsupervised = loss_unsupervised.sum() / num_unsupervised_samples
+            else:
+                loss_unsupervised =  loss_unsupervised.sum()                    
+                       
+        if (num_supervised_samples > 0):
+            input_to_panet = gt_coord[labelled].reshape((gt_coord[labelled].shape[0], FreiHandConfig.num_joints, 3))
+            input_to_panet = augment.prepare_panet_input(input_to_panet, tprime[labelled], trans[labelled], 
+                                                         bbox[labelled], K[labelled], R[labelled], scale[labelled], p=False)
+            joint_cam_normalized = joint_cam_normalized[labelled]
+            joint_cam_normalized = joint_cam_normalized - joint_cam_normalized.mean(1, keepdims=True)          
+            assert torch.max(input_to_panet - joint_cam_normalized) < 10e-4     
+            loss_supervised = torch.abs(coord_out[labelled] - gt_coord[labelled]) * gt_vis[labelled]
+            if self.size_average:
+                loss_supervised = loss_supervised.sum() / num_supervised_samples
+            else:
+                loss_supervised =  loss_supervised.sum()
+        
+        print(loss_unsupervised)
+        print(loss_supervised)
+        loss = loss_supervised + loss_unsupervised
+        
+        return loss
+        
         
         
 class JointLocationLoss2(nn.Module):
@@ -113,10 +202,6 @@ class JointLocationLoss2(nn.Module):
         trans = np.linalg.inv(trans)
         K = K.detach().cpu().numpy()
         tprime = tprime.detach().cpu().numpy()
-        #=======================================================================
-        # print(label_gt[0])
-        # print(augmentation["joint_img3"][0])  
-        #=======================================================================
         pre_3d_kpt = []
         for n_sample in range(label.shape[0]):
             xyz_rot = np.matmul(R[n_sample], joint_cam[n_sample].T).T         
@@ -128,17 +213,6 @@ class JointLocationLoss2(nn.Module):
                                                             center_y[n_sample], width[n_sample], height[n_sample], 
                                                             cfg.patch_width, cfg.patch_height, scale[n_sample], 
                                                             trans[n_sample], tprime[n_sample])
-            
-            
-            #===================================================================
-            # print(tmp2)
-            # print(augmentation["joint_img2"][0])  
-            #===================================================================
-            #tmp2 = torch.from_numpy(tmp2)
-            #tmp = torch.from_numpy(tmp)
-            #tmp[:,2] = tmp[:,2] + xyz_rot[:,2][9]*1000
-            
-            #tmp2[:,2] = tmp2[:,2] + xyz_rot[:,2][9]*1000
             
             pre_3d = augment.pixel2cam(tmp, K[n_sample])
             label_3d_kpt = augment.pixel2cam(tmp2, K[n_sample])
@@ -152,8 +226,6 @@ class JointLocationLoss2(nn.Module):
                 assert np.allclose(label_3d_kpt, joint_cam_normalized[n_sample], rtol=1e-6, atol=1e-6)
             except:
                 print("(loss::JointLocationLoss2) Warning: label_3d_kpt and joint_cam_normalized are not equal.")
-                #print(label_3d_kpt)
-                #print(joint_cam_normalized)
         pre_3d_kpt = np.array(pre_3d_kpt)
         loss = []
         for i in range(pre_3d_kpt.shape[0]):          
@@ -164,11 +236,8 @@ class JointLocationLoss2(nn.Module):
         loss = torch.from_numpy(np.array(loss)).cuda()
         loss.requires_grad = False
         
-        # print(loss.shape) 32x21
-         #=======================================================================
         self.size_average = False
         if self.size_average:
             return loss.sum() / len(coord_out)
         else:
             return loss.sum()
-        #=======================================================================

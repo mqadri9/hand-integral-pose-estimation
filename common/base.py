@@ -15,7 +15,9 @@ from logger import colorlogger
 from nets.balanced_parallel import DataParallelModel, DataParallelCriterion
 from nets import loss
 from model import get_pose_net
-
+import config_panet as config_panet
+import PANet_reconstruction
+import copy
 #for p in sys.path:
 #    print(p)
 
@@ -65,14 +67,17 @@ class Base(object):
         optimizer.load_state_dict(ckpt['optimizer'])
         scheduler.load_state_dict(ckpt['scheduler'])
 
-        return start_epoch, model, optimizer, scheduler
-    
+        return start_epoch, model, optimizer, scheduler 
 
 class Trainer(Base):
     
     def __init__(self, cfg):
-        self.JointLocationLoss = DataParallelCriterion(loss.JointLocationLoss())
-        self.JointLocationLoss2 = DataParallelCriterion(loss.JointLocationLoss2())
+        if cfg.loss == "L_combined":
+            self.CombinedLoss = DataParallelCriterion(loss.CombinedLoss())
+            self.ParallelSoftmaxIntegralTensor = DataParallelCriterion(loss.ParallelSoftmaxIntegralTensor())
+        else: 
+            self.JointLocationLoss = DataParallelCriterion(loss.JointLocationLoss())
+            self.JointLocationLoss2 = DataParallelCriterion(loss.JointLocationLoss2())        
         super(Trainer, self).__init__(cfg, log_name = 'train_logs.txt')    
 
     def get_optimizer(self, optimizer_name, model):
@@ -86,10 +91,27 @@ class Trainer(Base):
             assert 0
 
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=self.cfg.lr_dec_epoch, gamma=self.cfg.lr_dec_factor)
-        print(self.cfg.lr_dec_epoch)
-        print(scheduler.get_lr())
         return optimizer, scheduler
+
+    def load_nrsfm_tester(self):
+        self.nrsfm_tester = PANet_reconstruction.NRSfM_tester(pts_num=config_panet.pts_num)
+        self.nrsfm_tester.load_model(config_panet.pretrain_model)
+        self.nrsfm_tester.nrsfm_net = DataParallelModel(self.nrsfm_tester.nrsfm_net).cuda()
+        self.logger.info("loaded Procrustes Analysis Network")
     
+    def load_regressor_teacher(self):
+        ckpt = torch.load(cfg.teacher_model_path)
+        model = get_pose_net(self.cfg, True, self.joint_num)
+        model = DataParallelModel(model).cuda()
+        optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
+        model.load_state_dict(ckpt['network'])
+        optimizer.load_state_dict(ckpt['optimizer'])
+        scheduler.load_state_dict(ckpt['scheduler'])    
+        self.teacher_network = model
+        self.teacher_network.eval()
+        self.logger.info("Loaded teacher pose regressor")
+        return copy.deepcopy(model)
+       
     def _make_batch_generator(self, main_loop=True):
         self.logger.info("Creating dataset...")
         trainset_list = []
@@ -99,7 +121,8 @@ class Trainer(Base):
         trainset_loader = DatasetLoader(trainset_list, True, 
                                         transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=self.cfg.pixel_mean, std=self.cfg.pixel_std)]),
                                         main_loop=main_loop)
-
+        print("batch size ")
+        print(self.cfg.num_gpus*self.cfg.batch_size)
         batch_generator = DataLoader(dataset=trainset_loader, 
                                      batch_size=self.cfg.num_gpus*self.cfg.batch_size, 
                                      shuffle=True, 
@@ -118,7 +141,9 @@ class Trainer(Base):
         optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
         if self.cfg.continue_train:
             start_epoch, model, optimizer, scheduler = self.load_model(model, optimizer, scheduler)
-        else:
+        elif cfg.loss == "L_combined":
+            self.load_nrsfm_tester()
+            model = self.load_regressor_teacher()
             start_epoch = 0
         model.train()
         #optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
@@ -126,8 +151,8 @@ class Trainer(Base):
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
-        print(start_epoch)
-        print(scheduler.get_lr())
+        assert self.model.training
+        assert not self.teacher_network.training
         
 class Tester(Base):
     
@@ -153,7 +178,26 @@ class Tester(Base):
         self.batch_generator = batch_generator
         self.num_samples = testset.num_samples
         print("Number of testing samples is {}".format(self.num_samples))
+
+    def load_nrsfm_tester(self):
+        #### Loaded to calculate testing loss only #####
+        self.logger.info("loading Procrustes Analysis Network")
+        self.nrsfm_tester = PANet_reconstruction.NRSfM_tester(pts_num=config_panet.pts_num)
+        self.nrsfm_tester.load_model(config_panet.pretrain_model)     
+        self.nrsfm_reconstruction_func = PANet_reconstruction.PANet_reconstruction
     
+    def load_regressor_teacher(self):
+        #### Loaded to calculate testing loss only #####
+        self.logger.info("Loading teacher pose regressor")
+        ckpt = torch.load(cfg.teacher_model_path)
+        model = get_pose_net(self.cfg, True, self.joint_num)
+        model = DataParallelModel(model).cuda()
+        optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
+        model.load_state_dict(ckpt['network'])
+        optimizer.load_state_dict(ckpt['optimizer'])
+        scheduler.load_state_dict(ckpt['scheduler'])    
+        self.teacher_network = model
+       
     def _make_model(self):
         
         model_path = os.path.join(self.cfg.model_dir, 'snapshot_%d.pth.tar' % self.test_epoch)
@@ -168,7 +212,10 @@ class Tester(Base):
         model.load_state_dict(ckpt['network'])
         model.eval()
         self.model = model
-
+        #if cfg.loss == "L_combined":
+        #    self.load_nrsfm_tester()
+        #    self.load_regressor_teacher()
+        
     def _evaluate(self, preds, label_list, augmentation_list, result_save_path):
         self.testset.evaluate(preds, label_list, augmentation_list,  result_save_path)
 

@@ -171,11 +171,13 @@ class FreiHand:
         """ Hardcoded size of the datasets. """
         if data_split == 'training':
             #return 32560  # number of unique samples (they exists in multiple 'versions')
-            return 30000
-            #return 10
+            return cfg.training_size
+            #return 3255
+            #return 100
         elif data_split == "testing":
-            return 2560
-            #return 10
+            return cfg.testing_size 
+            #return 29305
+            #return 100
         elif data_split == 'evaluation':
             return 3960
         else:
@@ -383,42 +385,44 @@ class FreiHand:
                 # annotation for this frame
                 K, mano, xyz, ref_bone_len = db_data_anno[idx]
                 K, mano, xyz, ref_bone_len = [np.array(x) for x in [K, mano, xyz, ref_bone_len]]
-                bbox = augment.find_bb_hand_detector(img_path, self.hand_detector)
-                #print(bbox)
-                #print("====")
-                # right now assume all points are visible . However, we can modify the
-                # db_data_annot to return the visibility for each sample
-                # can create a training_visiblity.json that we can read
-                # Right now assume all points are visible
-                #===============================================================
-                # uv, _, _ = self.projectPoints(xyz, np.eye(3), K)
-                # fig = plt.figure()
-                #   
-                # ax1 = fig.add_subplot(121)
-                # ax2 = fig.add_subplot(122)
-                # # 
-                # #ax1.imshow((255*img_patch/np.max(img_patch)).astype(np.uint8))
-                # ax2.imshow(img)
-                # #ax1.imshow(img2_w)
-                # # 
-                # #FreiHand.plot_hand(ax1, joint_img[:, 0:2], order='uv')
-                # self.plot_hand(ax2, uv, order='uv')
-                # ax1.axis('off')
-                # nn = str(random.randint(1,3000))
-                # plt.savefig('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn))    
-                #===============================================================
+                if cfg.use_hand_detector:
+                    faster_rccn_bbox = augment.find_bb_hand_detector(img_path, self.hand_detector)
+                else:
+                    faster_rccn_bbox = None
                 vis = np.ones(xyz.shape)          
                 joint_cam = self.process_coordinates(xyz, vis, K)
-                data.append({
+                if idx in range(cfg.labelled_data_range):
+                    labelled = True
+                else:
+                    labelled = False
+                #===============================================================
+                # data.append({
+                #     'img_path': img_path,
+                #     'joint_cam': joint_cam, # [X, Y, Z] in camera coordinate
+                #     'K': K,
+                #     'version': version,
+                #     "idx": idx,
+                #     "ref_bone_len": ref_bone_len,
+                #     "faster_rccn_bbox": faster_rccn_bbox
+                # })
+                #===============================================================
+                d = {
                     'img_path': img_path,
-                    'joint_cam': joint_cam, # [X, Y, Z] in camera coordinate
+                    #'joint_cam': joint_cam, # [X, Y, Z] in camera coordinate
                     'K': K,
                     'version': version,
                     "idx": idx,
                     "ref_bone_len": ref_bone_len,
-                    "faster_rccn_bbox": bbox
-                })
-            
+                    "faster_rccn_bbox": faster_rccn_bbox
+                }
+                if idx in range(cfg.labelled_data_range):
+                    d["joint_cam"] = joint_cam
+                    d["labelled"] = True
+                else:
+                    d["joint_cam"] = joint_cam
+                    d["labelled"] = False                    
+                data.append(d)
+                
         with open(cache_file, 'wb') as fid:
             pk.dump(data, fid, pk.HIGHEST_PROTOCOL)
         print('{} samples read wrote {}'.format(len(data), cache_file))
@@ -856,7 +860,6 @@ class FreiHand:
         np.save("vertices", vertices)
         self.dump('pred.json', predictions, vertices)
         print("completed")
-            
       
     def evaluate_kp(self):
         return
