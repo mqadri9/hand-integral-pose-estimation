@@ -51,9 +51,9 @@ class Config:
     pixel_mean = (0.4559, 0.5142, 0.5148)
     pixel_std = (1, 1, 1) #(0.2736, 0.2474, 0.2523)
     
-    num_thread = 1
+    num_thread = 20
     
-    use_hand_detector = False
+    use_hand_detector = True
     online_hand_detection = False
     checksession = 1
     checkepoch = 6

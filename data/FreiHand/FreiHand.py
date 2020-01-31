@@ -171,11 +171,11 @@ class FreiHand:
         """ Hardcoded size of the datasets. """
         if data_split == 'training':
             #return 32560  # number of unique samples (they exists in multiple 'versions')
-            return 30000
-            #return 10
+            #return 32540
+            return 26050
         elif data_split == "testing":
-            return 2560
-            #return 10
+            #return 20
+            return 3255
         elif data_split == 'evaluation':
             return 3960
         else:
