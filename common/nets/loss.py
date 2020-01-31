@@ -93,6 +93,8 @@ class JointLocationLoss(nn.Module):
             return loss.sum()
         
 def computeMPJPE(pred, gt):
+    pred = pred.reshape((pred.shape[0], FreiHandConfig.num_joints, 3))
+    gt = gt.reshape((gt.shape[0], FreiHandConfig.num_joints, 3))
     return (pred - gt).norm(dim=2).mean(-1).mean()
 
  
@@ -123,6 +125,13 @@ class CombinedLoss(nn.Module):
         num_unsupervised_samples = coord_out[~labelled].shape[0]
         num_supervised_samples = coord_out[labelled].shape[0]
         coord_out_teacher = torch.squeeze(coord_out_teacher, dim=0)
+        
+        with torch.no_grad():
+            student_mpjpe = computeMPJPE(coord_out, gt_coord)
+            teacher_mpjpe = computeMPJPE(coord_out_teacher, gt_coord)
+        _assert_no_grad(student_mpjpe)
+        _assert_no_grad(teacher_mpjpe)
+        
         loss_unsupervised = 0.0
         loss_supervised = 0.0
         if(num_unsupervised_samples > 0):
@@ -159,11 +168,9 @@ class CombinedLoss(nn.Module):
             else:
                 loss_supervised =  loss_supervised.sum()
         
-        print(loss_unsupervised)
-        print(loss_supervised)
         loss = loss_supervised + loss_unsupervised
         
-        return loss
+        return loss, student_mpjpe, teacher_mpjpe
         
         
         

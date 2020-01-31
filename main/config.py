@@ -31,7 +31,7 @@ class Config:
     #end_epoch = 20
     end_epoch = 400
     #lr = 1e-3 
-    lr = 1e-3
+    lr = 1e-4
     #lr_dec_factor = 0.5
     lr_dec_factor = 0.1
     optimizer = 'adam'

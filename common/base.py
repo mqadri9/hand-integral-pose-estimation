@@ -141,12 +141,15 @@ class Trainer(Base):
         optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
         if self.cfg.continue_train:
             start_epoch, model, optimizer, scheduler = self.load_model(model, optimizer, scheduler)
+            if cfg.loss == "L_combined":
+                self.load_nrsfm_tester()
+                self.load_regressor_teacher()
         elif cfg.loss == "L_combined":
             self.load_nrsfm_tester()
             model = self.load_regressor_teacher()
             start_epoch = 0
         model.train()
-        #optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
+        optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
         self.start_epoch = start_epoch
         self.model = model
         self.optimizer = optimizer

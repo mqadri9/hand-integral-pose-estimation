@@ -91,62 +91,64 @@ class DatasetLoader(Dataset):
         else:
             scale, R, color_scale = 1.0, np.eye(3), [1.0, 1.0, 1.0]
         if not self.is_eval:
-            if data["labelled"]:
-                K = data['K']
-                joint_cam = data["joint_cam"]
-                faster_rcnn_bbox = data['faster_rccn_bbox']
-                # 1. load image
-                
-                if not self.main_loop:
-                    return cvimg
-                if not isinstance(cvimg, np.ndarray):
-                    raise IOError("Fail to read %s" % data['img_path'])
-               
-                
-                # 2. get augmentation params
-                #self.do_augment = True
-                if cfg.use_hand_detector:
-                    if faster_rcnn_bbox is None:
-                        print("(Warning) use_hand_detector is set to True but faster_rcnn_bbox is None")
-                    img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False, 
-                                                                                                                                                       hand_detector=self.hand_detector, 
-                                                                                                                                                       img_path=data['img_path'],
-                                                                                                                                                       faster_rcnn_bbox=faster_rcnn_bbox)
-                else:
-                    img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False)
-                # 4. generate patch joint ground truth
-        
-                for n_jt in range(len(joint_img)):
-                    joint_img[n_jt, 0:2] = augment.trans_point2d(joint_img[n_jt, 0:2], trans)
-                
-                params = {
-                    "R": R,
-                    "K": K,
-                    "joint_cam": joint_cam,
-                    "scale": scale,
-                    "img_path": data['img_path'],
-                    "tprime": tprime,
-                    "tprime_torch": torch.from_numpy(np.array([tprime])),
-                    "bbox": np.array(bbox),
-                    "trans": trans,
-                    "joint_cam_normalized": joint_cam_normalized,
-                    "joint_img_orig": joint_img_orig,
-                    "ref_bone_len": data["ref_bone_len"],
-                    "labelled": True
-                }
-                label, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)              
-                params["label"] = label
-                params["label_weight"] = label_weight
+            #if data["labelled"]:
+            K = data['K']
+            joint_cam = data["joint_cam"]
+            faster_rcnn_bbox = data['faster_rccn_bbox']
+            # 1. load image
+            
+            if not self.main_loop:
+                return cvimg
+            if not isinstance(cvimg, np.ndarray):
+                raise IOError("Fail to read %s" % data['img_path'])
+           
+            
+            # 2. get augmentation params
+            #self.do_augment = True
+            if cfg.use_hand_detector:
+                if faster_rcnn_bbox is None:
+                    print("(Warning) use_hand_detector is set to True but faster_rcnn_bbox is None")
+                img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False, 
+                                                                                                                                                   hand_detector=self.hand_detector, 
+                                                                                                                                                   img_path=data['img_path'],
+                                                                                                                                                   faster_rcnn_bbox=faster_rcnn_bbox)
             else:
-                img_patch, params = augment.generate_input_unlabelled(cvimg, R, scale, data)
-                params["R"] = R
-                params["joint_cam"] = np.zeros((21, 3))
-                params["scale"] = scale
-                params["trans"] = np.eye(3)
-                params["joint_cam_normalized"] = np.zeros((21, 3))
-                params["joint_img_orig"] = np.zeros((21, 3))
-                params["label"] = np.zeros((63,))
-                params["label_weight"] = np.ones((63,))
+                img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False)
+            # 4. generate patch joint ground truth
+    
+            for n_jt in range(len(joint_img)):
+                joint_img[n_jt, 0:2] = augment.trans_point2d(joint_img[n_jt, 0:2], trans)
+            
+            params = {
+                "R": R,
+                "K": K,
+                "joint_cam": joint_cam,
+                "scale": scale,
+                "img_path": data['img_path'],
+                "tprime": tprime,
+                "tprime_torch": torch.from_numpy(np.array([tprime])),
+                "bbox": np.array(bbox),
+                "trans": trans,
+                "joint_cam_normalized": joint_cam_normalized,
+                "joint_img_orig": joint_img_orig,
+                "ref_bone_len": data["ref_bone_len"],
+                "labelled": data["labelled"]
+            }
+            label, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)              
+            params["label"] = label
+            params["label_weight"] = label_weight
+            #===================================================================
+            # else:
+            #     img_patch, params = augment.generate_input_unlabelled(cvimg, R, scale, data)
+            #     params["R"] = R
+            #     params["joint_cam"] = np.zeros((21, 3))
+            #     params["scale"] = scale
+            #     params["trans"] = np.eye(3)
+            #     params["joint_cam_normalized"] = np.zeros((21, 3))
+            #     params["joint_img_orig"] = np.zeros((21, 3))
+            #     params["label"] = np.zeros((63,))
+            #     params["label_weight"] = np.ones((63,))
+            #===================================================================
            
             img_patch = self.transform(img_patch)
             for n_c in range(img_channels):
