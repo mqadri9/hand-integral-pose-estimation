@@ -65,7 +65,7 @@ class DatasetLoader(Dataset):
             self.hand_detector.load_faster_rcnn_detector() 
         
     def __getitem__(self, index):
-        if self.is_train:
+        if self.is_train and cfg.custom_batch_selection:
             if random.random() <= 0.5:
                 index = np.random.randint(cfg.labelled_data_range)
             else:

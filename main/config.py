@@ -46,17 +46,18 @@ class Config:
     patch_height = 224
     pad_factor = 1.75
     
-    loss = "L_combined"
+    loss = "L1"
     _lambda = 1
-    labelled_data_range = 3255 + 1
+    labelled_data_range = 26050 + 1
     training_size = 26050
     testing_size = 3255
+    custom_batch_selection = False
     # TODO move the pixel_mean and pixel_std to the Freihand specific config file: FreiHand_config.py?
     pixel_mean = (0.4559, 0.5142, 0.5148)
     pixel_std = (1, 1, 1) #(0.2736, 0.2474, 0.2523)
     scaling_constant = 100
     
-    num_thread = 1
+    num_thread = 20
     use_hand_detector = True
     online_hand_detection = False
     checksession = 1
