@@ -144,9 +144,13 @@ class Trainer(Base):
             if cfg.loss == "L_combined":
                 self.load_nrsfm_tester()
                 self.load_regressor_teacher()
+                assert not self.teacher_network.training
         elif cfg.loss == "L_combined":
             self.load_nrsfm_tester()
             model = self.load_regressor_teacher()
+            assert not self.teacher_network.training
+            start_epoch = 0
+        else:
             start_epoch = 0
         model.train()
         optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
@@ -155,7 +159,6 @@ class Trainer(Base):
         self.optimizer = optimizer
         self.scheduler = scheduler
         assert self.model.training
-        assert not self.teacher_network.training
         
 class Tester(Base):
     
@@ -193,13 +196,12 @@ class Tester(Base):
         #### Loaded to calculate testing loss only #####
         self.logger.info("Loading teacher pose regressor")
         ckpt = torch.load(cfg.teacher_model_path)
-        model = get_pose_net(self.cfg, True, self.joint_num)
-        model = DataParallelModel(model).cuda()
-        optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
-        model.load_state_dict(ckpt['network'])
-        optimizer.load_state_dict(ckpt['optimizer'])
-        scheduler.load_state_dict(ckpt['scheduler'])    
-        self.teacher_network = model
+        teacher_model = get_pose_net(self.cfg, True, self.joint_num)
+        teacher_model = DataParallelModel(teacher_model).cuda() 
+        ckpt = torch.load(cfg.teacher_model_path)
+        teacher_model.load_state_dict(ckpt['network'])
+        teacher_model.eval()
+        self.teacher_network = teacher_model
        
     def _make_model(self):
         
@@ -215,9 +217,9 @@ class Tester(Base):
         model.load_state_dict(ckpt['network'])
         model.eval()
         self.model = model
-        #if cfg.loss == "L_combined":
-        #    self.load_nrsfm_tester()
-        #    self.load_regressor_teacher()
+        if cfg.loss == "L_combined":
+            self.load_nrsfm_tester()
+            self.load_regressor_teacher()
         
     def _evaluate(self, preds, label_list, augmentation_list, result_save_path):
         self.testset.evaluate(preds, label_list, augmentation_list,  result_save_path)

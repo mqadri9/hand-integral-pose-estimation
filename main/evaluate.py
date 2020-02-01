@@ -44,7 +44,6 @@ def main():
     cudnn.benchmark = True
     cudnn.deterministic = False
     cudnn.enabled = True
-    
     evaluator = Evaluator(cfg, args.evaluate_epoch)
     evaluator._make_batch_generator()
     evaluator._make_model()

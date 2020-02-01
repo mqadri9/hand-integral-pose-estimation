@@ -61,10 +61,7 @@ def main():
         "img_path": [],
         "loss": [],
         "ref_bone_len": [],
-        "center_x": [],
-        "center_y": [],
-        "width": [],
-        "height": [],
+        "bbox": [],
         'tprime': []
     }
     with torch.no_grad():
@@ -73,13 +70,11 @@ def main():
             img_patch_sav = np.copy(img_patch[0].permute(1, 2, 0).cpu().detach().numpy())
             label = params["label"].cuda()
             label_weight = params["label_weight"].cuda()
-            center_x = params["bbox"][0].cuda()
-            center_y = params["bbox"][1].cuda()
-            width = params["bbox"][2].cuda()
-            height = params["bbox"][3].cuda()
+            bbox = params["bbox"].cuda()
             scale = params["scale"].cuda()
-            tprime = params["tprime"].cuda()
+            tprime = params["tprime_torch"].cuda()
             R = params["R"].cuda()
+            labelled = params["labelled"].cuda()
             trans = params["trans"].cuda()
             K = params["K"].cuda()
             joint_cam = params["joint_cam"].cuda()
@@ -88,9 +83,10 @@ def main():
             heatmap_out = tester.model(img_patch)
             if cfg.num_gpus > 1:
                 heatmap_out = gather(heatmap_out,0)
+            
             JointLocationLoss = tester.JointLocationLoss(heatmap_out, label, label_weight)
-            #JointLocationLoss2 = tester.JointLocationLoss2(heatmap_out, label, label_weight, joint_cam, joint_cam_normalized, center_x,
-            #                                               center_y, width, height, scale, R, trans, K, tprime)
+            JointLocationLoss2 = tester.JointLocationLoss2(heatmap_out, label, label_weight, joint_cam, 
+                                                           joint_cam_normalized, bbox, scale, R, trans, K, tprime)
             loss1 = JointLocationLoss.detach()
             #===================================================================
             # if loss1 > 10:
@@ -130,11 +126,8 @@ def main():
             params_list["scale"].append(params["scale"])
             params_list["img_path"].append(params["img_path"])
             params_list["ref_bone_len"].append(params["ref_bone_len"])
-            params_list["center_x"].append(params["bbox"][0])
-            params_list["center_y"].append(params["bbox"][1])
-            params_list["width"].append(params["bbox"][2])
-            params_list["height"].append(params["bbox"][3])
-            params_list["tprime"].append(params["tprime"])
+            params_list["bbox"].append(params["bbox"])
+            params_list["tprime"].append(params["tprime_torch"].data.cpu().numpy())
             params_list["loss"].append(JointLocationLoss.detach())
             preds_in_patch_with_score.append(augment.get_joint_location_result(cfg.patch_width, cfg.patch_height, heatmap_out))
             #print(data['label'].cpu().detach().numpy().shape)
@@ -160,10 +153,7 @@ def main():
     params_list["scale"] = np.concatenate(params_list["scale"], axis=0)
     params_list["img_path"] = np.concatenate(params_list["img_path"], axis=0)
     params_list["ref_bone_len"] = np.concatenate(params_list["ref_bone_len"], axis=0)
-    params_list["center_x"] = np.concatenate(params_list["center_x"], axis=0)
-    params_list["center_y"] = np.concatenate(params_list["center_y"], axis=0)
-    params_list["width"] = np.concatenate(params_list["width"], axis=0)
-    params_list["height"] = np.concatenate(params_list["height"], axis=0)
+    params_list["bbox"] = np.concatenate(params_list["bbox"], axis=0)
     params_list["tprime"] = np.concatenate(params_list["tprime"], axis=0)
     
     tester._evaluate(preds_in_patch_with_score, label_list, params_list, cfg.result_dir) 

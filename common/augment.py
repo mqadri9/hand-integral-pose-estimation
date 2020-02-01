@@ -537,7 +537,7 @@ def generate_input_unlabelled(cvimg, R, scale, data):
         "img_path": data["img_path"],
         "bbox": np.array([center_x, center_y, bb_width, bb_height]),
         "tprime": tprime,
-        "tprime_torch": torch.from_numpy(np.array([tprime])),
+        #"tprime_torch": torch.from_numpy(np.array([tprime])),
         "labelled": False
     }
     return img_patch, params

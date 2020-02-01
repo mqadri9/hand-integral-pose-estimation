@@ -179,7 +179,7 @@ class JointLocationLoss2(nn.Module):
         super(JointLocationLoss2, self).__init__()
         self.size_average = True
 
-    def forward(self, heatmap_out, gt_label, gt_vis, joint_cam, joint_cam_normalized, center_x, center_y, width, height, scale, R, trans, K, tprime):
+    def forward(self, heatmap_out, gt_label, gt_vis, joint_cam, joint_cam_normalized, bbox, scale, R, trans, K, tprime):
         
         joint_num = int(gt_label.shape[1]/3)
         #print(heatmap_out.shape)
@@ -199,10 +199,7 @@ class JointLocationLoss2(nn.Module):
         label_gt = augment.test_get_joint_loc_res(gt_label.detach().cpu().numpy())
         joint_cam = joint_cam.detach().cpu().numpy()
         joint_cam_normalized = joint_cam_normalized.detach().cpu().numpy()
-        center_x = center_x.detach().cpu().numpy()
-        center_y = center_y.detach().cpu().numpy()
-        width = width.detach().cpu().numpy()
-        height = height.detach().cpu().numpy()
+        bbox = bbox.detach().cpu().numpy()
         scale = scale.detach().cpu().numpy()
         R = R.detach().cpu().numpy()
         trans = trans.detach().cpu().numpy()
@@ -212,14 +209,14 @@ class JointLocationLoss2(nn.Module):
         pre_3d_kpt = []
         for n_sample in range(label.shape[0]):
             xyz_rot = np.matmul(R[n_sample], joint_cam[n_sample].T).T         
-            tmp = augment.trans_coords_from_patch_to_org_3d(label[n_sample], center_x[n_sample],
-                                                           center_y[n_sample], width[n_sample], height[n_sample], 
-                                                           cfg.patch_width, cfg.patch_height, scale[n_sample], 
-                                                           trans[n_sample], tprime[n_sample])
-            tmp2 = augment.trans_coords_from_patch_to_org_3d(label_gt[n_sample], center_x[n_sample],
-                                                            center_y[n_sample], width[n_sample], height[n_sample], 
-                                                            cfg.patch_width, cfg.patch_height, scale[n_sample], 
-                                                            trans[n_sample], tprime[n_sample])
+            tmp = augment.trans_coords_from_patch_to_org_3d(label[n_sample], bbox[n_sample, 0],
+                                                            bbox[n_sample, 1], bbox[n_sample, 2],
+                                                            bbox[n_sample, 3], cfg.patch_width, cfg.patch_height, 
+                                                            scale[n_sample], trans[n_sample], tprime[n_sample])
+            tmp2 = augment.trans_coords_from_patch_to_org_3d(label_gt[n_sample], bbox[n_sample, 0],
+                                                            bbox[n_sample, 1], bbox[n_sample, 2],
+                                                            bbox[n_sample, 3], cfg.patch_width, cfg.patch_height, 
+                                                            scale[n_sample], trans[n_sample], tprime[n_sample])
             
             pre_3d = augment.pixel2cam(tmp, K[n_sample])
             label_3d_kpt = augment.pixel2cam(tmp2, K[n_sample])

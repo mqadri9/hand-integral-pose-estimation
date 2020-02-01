@@ -440,10 +440,11 @@ class FreiHand:
             R = params_list["R"][i]
             scale = params_list["scale"][i]
             ref_bone_len = params_list["ref_bone_len"][i]
-            center_x = params_list["center_x"][i]
-            center_y = params_list["center_y"][i]
-            width = params_list["width"][i]
-            height = params_list["height"][i]
+            bbox = params_list["bbox"][i]
+            center_x = bbox[0]
+            center_y = bbox[1]
+            width = bbox[2]
+            height = bbox[3]
             img_path = params_list['img_path'][i]
             cvimg = cv2.imread(img_path, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
             #===================================================================
@@ -626,15 +627,14 @@ class FreiHand:
             #print(gts[n_sample]['trans'])
             #print("shape")
             #print(preds_in_patch_with_score[n_sample].shape)
+            bb = gts[n_sample]["bbox"]
             preds_in_img_with_score.append(
-                augment.trans_coords_from_patch_to_org_3d(preds_in_patch_with_score[n_sample], gts[n_sample]['center_x'],
-                                                          gts[n_sample]['center_y'], gts[n_sample]['width'],
-                                                          gts[n_sample]['height'], cfg.patch_width, cfg.patch_height, gts[n_sample]['scale'], 
+                augment.trans_coords_from_patch_to_org_3d(preds_in_patch_with_score[n_sample], bb[0],
+                                                          bb[1], bb[2], bb[3], cfg.patch_width, cfg.patch_height, gts[n_sample]['scale'], 
                                                           gts[n_sample]['trans'], gts[n_sample]['tprime']))
             label_in_img_with_score.append(
-                augment.trans_coords_from_patch_to_org_3d(label_list[n_sample], gts[n_sample]['center_x'],
-                                                          gts[n_sample]['center_y'], gts[n_sample]['width'],
-                                                          gts[n_sample]['height'], cfg.patch_width, cfg.patch_height, gts[n_sample]['scale'], 
+                augment.trans_coords_from_patch_to_org_3d(label_list[n_sample], bb[0],  bb[1],  bb[2],  bb[3],
+                                                          cfg.patch_width, cfg.patch_height, gts[n_sample]['scale'], 
                                                           gts[n_sample]['trans'], gts[n_sample]['tprime']))
     
         preds_in_img_with_score = np.asarray(preds_in_img_with_score)

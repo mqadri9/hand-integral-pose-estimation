@@ -89,12 +89,13 @@ def main():
             else:
                 JointLocationLoss = trainer.JointLocationLoss(heatmap_out, label, label_weight)
                 loss = JointLocationLoss
-
+                student_mpjpe = 1
+                teacher_mpjpe = 1
+            
             loss.backward()
             trainer.optimizer.step()
             
-            trainer.gpu_timer.toc()
-
+            trainer.gpu_timer.toc()         
             screen = [
                 'Epoch %d/%d itr %d/%d:' % (epoch, cfg.end_epoch, itr, trainer.itr_per_epoch),
                 'lr: %g' % (trainer.scheduler.get_lr()[0]),
