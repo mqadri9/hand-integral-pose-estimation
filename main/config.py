@@ -31,7 +31,7 @@ class Config:
     #end_epoch = 20
     end_epoch = 400
     #lr = 1e-3 
-    lr = 1e-4
+    lr = 1e-3
     #lr_dec_factor = 0.5
     lr_dec_factor = 0.1
     optimizer = 'adam'
@@ -46,10 +46,10 @@ class Config:
     patch_height = 224
     pad_factor = 1.75
     
-    loss = "L_combined"
+    loss = "L1"
     _lambda = 1
-    labelled_data_range = 26050 + 1
-    training_size = 26050
+    labelled_data_range = 3255 + 1
+    training_size = 3255
     testing_size = 3255
     custom_batch_selection = False
     # TODO move the pixel_mean and pixel_std to the Freihand specific config file: FreiHand_config.py?
@@ -57,7 +57,7 @@ class Config:
     pixel_std = (1, 1, 1) #(0.2736, 0.2474, 0.2523)
     scaling_constant = 100
     
-    num_thread = 1
+    num_thread = 4
     use_hand_detector = True
     online_hand_detection = False
     checksession = 1

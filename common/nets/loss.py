@@ -8,11 +8,15 @@ import augment
 import config_panet
 
 def _assert_no_grad(tensor):
+    if type(tensor) is not "torch.Tensor":
+        return
     assert not tensor.requires_grad, \
         "nn criterions don't compute the gradient w.r.t. targets - please " \
         "mark these tensors as not requiring gradients"
 
 def _assert_grad(tensor):
+    if type(tensor) is not "torch.Tensor":
+        return
     assert tensor.requires_grad, \
         "Make sure that grad is set to true for this tensor"
         
@@ -132,19 +136,51 @@ class CombinedLoss(nn.Module):
         _assert_no_grad(student_mpjpe)
         _assert_no_grad(teacher_mpjpe)
         
-        loss_unsupervised = 0.0
-        loss_supervised = 0.0
+        loss_unsupervised = 0
+        loss_supervised = 0
+        loss_unsupervised_tmp = 0
+        loss_supervised_tmp = 0        
+        
         if(num_unsupervised_samples > 0):
             input_to_panet = coord_out[~labelled].reshape((coord_out[~labelled].shape[0], FreiHandConfig.num_joints, 3))
             input_to_panet = augment.prepare_panet_input(input_to_panet, tprime[~labelled], trans[~labelled], bbox[~labelled], 
                                                          K[~labelled], R[~labelled], scale[~labelled])
+            input_to_panet = np.ones((1, 21, 3))*0.01
+            input_to_panet = torch.from_numpy(input_to_panet).float().cuda()
+
             panet_output, pts_recon_canonical, camera_matrix, code = nrsfm_tester.forward(input_to_panet)
+            #===================================================================
+            # print("panet_output")
+            # print(panet_output)
+            #===================================================================
             panet_output = panet_output.reshape(panet_output.shape[0], FreiHandConfig.num_joints * 3)
             #panet_output = torch.tensor(panet_output, requires_grad=True).cuda() # delete
             _assert_grad(panet_output)
             coord_out_reshaped =  coord_out.reshape(coord_out.shape[0], FreiHandConfig.num_joints,  3)
             coord_out_reshaped = coord_out_reshaped - coord_out_reshaped.mean(1, keepdims=True)
             coord_out_reshaped = coord_out_reshaped.reshape(coord_out_reshaped.shape[0], FreiHandConfig.num_joints * 3)
+            
+            gt_coord = gt_coord.reshape((gt_coord.shape[0], FreiHandConfig.num_joints, 3))
+            gt_norm = augment.prepare_panet_input(gt_coord, tprime[~labelled], trans[~labelled], bbox[~labelled], 
+                                                   K[~labelled], R[~labelled], scale[~labelled])
+            
+            #===================================================================
+            # print("gt_coord")
+            # print(gt_norm)
+            # print('input_to_panet')
+            # print(input_to_panet)
+            # print(input_to_panet.shape)
+            # print("coord_out_reshaped")
+            # print(coord_out_reshaped)
+            # print(coord_out_reshaped.shape)
+            # print("computeMPJPE gt-input")
+            # print(computeMPJPE(gt_norm, input_to_panet))
+            # print("computeMPJPE gt-output")
+            # print(computeMPJPE(gt_norm, panet_output))
+            # print("computeMPJPE input-output")
+            # print(computeMPJPE(input_to_panet, panet_output))
+            # sys.exit()            
+            #===================================================================      
             Lteacher = (torch.abs(coord_out[~labelled] - coord_out_teacher[~labelled])) * gt_vis[~labelled]
             LPanet = (cfg._lambda * torch.abs(coord_out_reshaped[~labelled] - panet_output)) * gt_vis[~labelled]
             #loss_unsupervised = (torch.abs(coord_out[~labelled] - coord_out_teacher[~labelled]) + 
@@ -168,9 +204,27 @@ class CombinedLoss(nn.Module):
             else:
                 loss_supervised =  loss_supervised.sum()
         
-        loss = loss_supervised + loss_unsupervised
-        
-        return loss, student_mpjpe, teacher_mpjpe
+        if loss_supervised !=0 and loss_unsupervised !=0:
+            loss = loss_supervised + loss_unsupervised
+            loss_supervised_tmp = loss_supervised.detach()
+            loss_unsupervised_tmp = loss_unsupervised.detach()
+        elif loss_supervised !=0:
+            loss = loss_supervised
+            loss_supervised_tmp = loss_supervised.detach()
+        elif loss_unsupervised !=0:
+            loss = loss_unsupervised
+            loss_unsupervised_tmp = loss_unsupervised.detach()
+        #print(loss)
+        #print('=============================')
+        #print(loss_supervised)
+        #print(type(loss_unsupervised))
+
+        _assert_no_grad(loss_supervised_tmp)
+        _assert_no_grad(loss_unsupervised_tmp)
+        _assert_grad(loss_supervised)
+        _assert_grad(loss_unsupervised)
+        _assert_grad(loss)
+        return loss, student_mpjpe, teacher_mpjpe, loss_supervised_tmp, loss_unsupervised_tmp
         
         
         

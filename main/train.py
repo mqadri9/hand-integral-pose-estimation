@@ -82,15 +82,17 @@ def main():
                                                                         hm_width, hm_height, hm_depth))                 
                 del heatmap_teacher_out
                 coord_out_teacher = torch.stack(coord_out_teacher, dim=0)
-                combinedLoss, student_mpjpe, teacher_mpjpe = trainer.CombinedLoss(heatmap_out, coord_out_teacher, label, label_weight, labelled, 
-                                                                                  tprime, trans, bbox, K, R, scale, joint_cam_normalized,
-                                                                                  trainer.nrsfm_tester)
+                combinedLoss, student_mpjpe, teacher_mpjpe, loss_supervised, loss_unsupervised = trainer.CombinedLoss(heatmap_out, coord_out_teacher, label, label_weight, labelled, 
+                                                                                                                              tprime, trans, bbox, K, R, scale, joint_cam_normalized,
+                                                                                                                              trainer.nrsfm_tester)
                 loss = combinedLoss
             else:
                 JointLocationLoss = trainer.JointLocationLoss(heatmap_out, label, label_weight)
                 loss = JointLocationLoss
                 student_mpjpe = 1
                 teacher_mpjpe = 1
+                loss_supervised = 1
+                loss_unsupervised = 1
             
             loss.backward()
             trainer.optimizer.step()
@@ -102,7 +104,8 @@ def main():
                 'speed: %.2f(%.2fs r%.2f)s/itr' % (
                     trainer.tot_timer.average_time, trainer.gpu_timer.average_time, trainer.read_timer.average_time),
                 '%.2fh/epoch' % (trainer.tot_timer.average_time / 3600. * trainer.itr_per_epoch),
-                '%s: %.4f | %s %.4f | %s %.4f' % ('loss_loc', loss.detach(), 'student_mpjpe', student_mpjpe*1000, 'teacher_mpjpe', teacher_mpjpe*1000) #.detach()),
+                '%s: %.4f | %s %.4f | %s %.4f | %s %.4f  | %s %.4f' % ('loss_loc', loss.detach(), 'student_mpjpe', student_mpjpe*1000, 'teacher_mpjpe', teacher_mpjpe*1000,
+                                                                        'loss_supervised', loss_supervised,  'loss_unsupervised', loss_unsupervised)
                 ]
             trainer.logger.info(' '.join(screen))
 
