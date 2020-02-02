@@ -67,7 +67,22 @@ class Base(object):
         optimizer.load_state_dict(ckpt['optimizer'])
         scheduler.load_state_dict(ckpt['scheduler'])
 
-        return start_epoch, model, optimizer, scheduler 
+        return start_epoch, model, optimizer, scheduler
+    
+    def compare_models(self, model_1, model_2):
+        models_differ = 0
+        for key_item_1, key_item_2 in zip(model_1.state_dict().items(), model_2.state_dict().items()):
+            if torch.equal(key_item_1[1], key_item_2[1]):
+                pass
+            else:
+                models_differ += 1
+                if (key_item_1[0] == key_item_2[0]):
+                    print('Mismtach found at', key_item_1[0])
+                else:
+                    raise Exception
+        if models_differ == 0:
+            print('Models match perfectly')
+        
 
 class Trainer(Base):
     
@@ -108,7 +123,7 @@ class Trainer(Base):
         optimizer.load_state_dict(ckpt['optimizer'])
         scheduler.load_state_dict(ckpt['scheduler'])    
         self.teacher_network = model
-        self.teacher_network.eval()
+        #self.teacher_network.eval()
         self.logger.info("Loaded teacher pose regressor")
         return copy.deepcopy(model)
        
@@ -144,11 +159,11 @@ class Trainer(Base):
             if cfg.loss == "L_combined":
                 self.load_nrsfm_tester()
                 self.load_regressor_teacher()
-                assert not self.teacher_network.training
+                #assert not self.teacher_network.training
         elif cfg.loss == "L_combined":
             self.load_nrsfm_tester()
             model = self.load_regressor_teacher()
-            assert not self.teacher_network.training
+            #assert not self.teacher_network.training
             start_epoch = 0
         else:
             start_epoch = 0
@@ -158,6 +173,7 @@ class Trainer(Base):
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
+        self.compare_models(self.teacher_network, self.model)
         assert self.model.training
         
 class Tester(Base):

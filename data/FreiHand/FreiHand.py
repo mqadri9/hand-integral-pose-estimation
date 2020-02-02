@@ -360,6 +360,17 @@ class FreiHand:
     
         if db != None:
             self.num_samples = len(db)
+            sorted(db, key = lambda i: i['labelled'])
+            n = 0 
+            max_index = 0
+            n_unlabelled = 0
+            for i, e in enumerate(db):
+                if e["labelled"]:
+                    n+=1
+                    max_index = i
+                else:
+                    n_unlabelled +=1
+            print("There are {} labelled examples. Max unlabelled {} . Max labelled index is {}".format(n, n_unlabelled, max_index))
             return db
         data = []
         
@@ -391,10 +402,6 @@ class FreiHand:
                     faster_rccn_bbox = None
                 vis = np.ones(xyz.shape)          
                 joint_cam = self.process_coordinates(xyz, vis, K)
-                if idx in range(cfg.labelled_data_range):
-                    labelled = True
-                else:
-                    labelled = False
                 #===============================================================
                 # data.append({
                 #     'img_path': img_path,
@@ -415,7 +422,7 @@ class FreiHand:
                     "ref_bone_len": ref_bone_len,
                     "faster_rccn_bbox": faster_rccn_bbox
                 }
-                if idx in range(cfg.labelled_data_range):
+                if idx in range(cfg.labelled_data_range) and version in cfg.Freihand_labelled_versions:
                     d["joint_cam"] = joint_cam
                     d["labelled"] = True
                 else:
@@ -427,6 +434,17 @@ class FreiHand:
             pk.dump(data, fid, pk.HIGHEST_PROTOCOL)
         print('{} samples read wrote {}'.format(len(data), cache_file))
         self.num_samples = len(data)
+        data = sorted(data, key = lambda i: i['labelled'])
+        n = 0 
+        n_unlabelled = 0
+        max_index = 0
+        for i, e in enumerate(data):
+            if e["labelled"]:
+                n+=1
+                max_index = i
+            else:
+                n_unlabelled +=1
+        print("There are {} labelled examples. Max unlabelled {} . Max labelled index is {}".format(n, n_unlabelled, max_index))
         return data
     
     def gen_test_data(self, params_list):

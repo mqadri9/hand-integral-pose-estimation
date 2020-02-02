@@ -45,6 +45,8 @@ def main():
     trainer._make_model()
     tester = Tester(cfg, trainer.start_epoch)
     tester._make_batch_generator()
+    
+
     for epoch in range(trainer.start_epoch, cfg.end_epoch):
         trainer.scheduler.step()
         trainer.tot_timer.tic()
@@ -55,7 +57,14 @@ def main():
             trainer.gpu_timer.tic()
             trainer.optimizer.zero_grad()
             img_patch = img_patch.cuda()
+            #trainer.compare_models(trainer.teacher_network, trainer.model)
             heatmap_out = trainer.model(img_patch)
+            #===================================================================
+            # heatmap_teacher_out = trainer.teacher_network(img_patch)
+            # print(heatmap_out)
+            # print(heatmap_teacher_out)
+            # sys.exit()
+            #===================================================================
             label = params["label"].cuda()
             label_weight = params["label_weight"].cuda()
             labelled = params["labelled"].cuda()

@@ -130,39 +130,50 @@ class CombinedLoss(nn.Module):
         num_supervised_samples = coord_out[labelled].shape[0]
         coord_out_teacher = torch.squeeze(coord_out_teacher, dim=0)
         
-        with torch.no_grad():
-            student_mpjpe = computeMPJPE(coord_out, gt_coord)
-            teacher_mpjpe = computeMPJPE(coord_out_teacher, gt_coord)
-        _assert_no_grad(student_mpjpe)
-        _assert_no_grad(teacher_mpjpe)
-        
         loss_unsupervised = 0
         loss_supervised = 0
         loss_unsupervised_tmp = 0
-        loss_supervised_tmp = 0        
-        
+        loss_supervised_tmp = 0   
+        student_mpjpe =  1
+        teacher_mpjpe = 1
+        #=======================================================================
+        # gt_norm = gt_coord.clone()
+        # gt_norm = gt_norm.reshape((gt_norm.shape[0], FreiHandConfig.num_joints, 3))
+        # gt_norm = augment.prepare_panet_input(gt_norm, tprime, trans, bbox, K, R, scale)
+        #  
+        # coord_out_tmp = coord_out.clone()
+        # coord_out_tmp = coord_out_tmp.reshape((coord_out_tmp.shape[0], FreiHandConfig.num_joints, 3))
+        # coord_out_tmp = augment.prepare_panet_input(coord_out_tmp, tprime, trans, bbox, K, R, scale)        
+        # 
+        # coord_out_teacher_tmp = coord_out_teacher.clone()
+        # coord_out_teacher_tmp = coord_out_teacher_tmp.reshape((coord_out_teacher_tmp.shape[0], FreiHandConfig.num_joints, 3))
+        # coord_out_teacher_tmp = augment.prepare_panet_input(coord_out_teacher_tmp, tprime, trans, bbox, K, R, scale)         
+        #=======================================================================
+         
+        #=======================================================================
+        # print("gt_norm")
+        # print(gt_norm.shape)
+        # print("coord_out_tmp")
+        # print(coord_out_tmp.shape)
+        # print("coord_out_teacher")
+        # print(coord_out_teacher_tmp.shape)
+        #=======================================================================
+         
+        with torch.no_grad():
+            student_mpjpe = computeMPJPE(coord_out, gt_coord)
+            teacher_mpjpe = computeMPJPE(coord_out_teacher, gt_coord)
+                
         if(num_unsupervised_samples > 0):
             input_to_panet = coord_out[~labelled].reshape((coord_out[~labelled].shape[0], FreiHandConfig.num_joints, 3))
             input_to_panet = augment.prepare_panet_input(input_to_panet, tprime[~labelled], trans[~labelled], bbox[~labelled], 
                                                          K[~labelled], R[~labelled], scale[~labelled])
-            input_to_panet = np.ones((1, 21, 3))*0.01
-            input_to_panet = torch.from_numpy(input_to_panet).float().cuda()
 
             panet_output, pts_recon_canonical, camera_matrix, code = nrsfm_tester.forward(input_to_panet)
-            #===================================================================
-            # print("panet_output")
-            # print(panet_output)
-            #===================================================================
             panet_output = panet_output.reshape(panet_output.shape[0], FreiHandConfig.num_joints * 3)
-            #panet_output = torch.tensor(panet_output, requires_grad=True).cuda() # delete
             _assert_grad(panet_output)
             coord_out_reshaped =  coord_out.reshape(coord_out.shape[0], FreiHandConfig.num_joints,  3)
             coord_out_reshaped = coord_out_reshaped - coord_out_reshaped.mean(1, keepdims=True)
             coord_out_reshaped = coord_out_reshaped.reshape(coord_out_reshaped.shape[0], FreiHandConfig.num_joints * 3)
-            
-            gt_coord = gt_coord.reshape((gt_coord.shape[0], FreiHandConfig.num_joints, 3))
-            gt_norm = augment.prepare_panet_input(gt_coord, tprime[~labelled], trans[~labelled], bbox[~labelled], 
-                                                   K[~labelled], R[~labelled], scale[~labelled])
             
             #===================================================================
             # print("gt_coord")
@@ -182,13 +193,19 @@ class CombinedLoss(nn.Module):
             # sys.exit()            
             #===================================================================      
             Lteacher = (torch.abs(coord_out[~labelled] - coord_out_teacher[~labelled])) * gt_vis[~labelled]
-            LPanet = (cfg._lambda * torch.abs(coord_out_reshaped[~labelled] - panet_output)) * gt_vis[~labelled]
+            #LPanet = (cfg._lambda * torch.abs(coord_out_reshaped[~labelled] - panet_output)) * gt_vis[~labelled]
             #loss_unsupervised = (torch.abs(coord_out[~labelled] - coord_out_teacher[~labelled]) + 
             #                     cfg._lambda * torch.abs(coord_out_reshaped[~labelled] - panet_output)) * gt_vis[~labelled]
-            loss_unsupervised = LPanet + Lteacher
+            #loss_unsupervised = LPanet + Lteacher
             if self.size_average:
-                loss_unsupervised = loss_unsupervised.sum() / num_unsupervised_samples
+                #LPanet = LPanet.sum() / num_unsupervised_samples
+                LPanet = 0
+                Lteacher = Lteacher.sum() / num_unsupervised_samples
+                #print(LPanet)
+                #print(Lteacher)
+                loss_unsupervised = LPanet + Lteacher
             else:
+                loss_unsupervised = LPanet + Lteacher
                 loss_unsupervised =  loss_unsupervised.sum()                    
                        
         if (num_supervised_samples > 0):
@@ -218,6 +235,9 @@ class CombinedLoss(nn.Module):
         #print('=============================')
         #print(loss_supervised)
         #print(type(loss_unsupervised))
+
+        #_assert_no_grad(student_mpjpe)
+        #_assert_no_grad(teacher_mpjpe)
 
         _assert_no_grad(loss_supervised_tmp)
         _assert_no_grad(loss_unsupervised_tmp)

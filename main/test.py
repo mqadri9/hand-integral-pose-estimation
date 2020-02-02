@@ -80,6 +80,13 @@ def main():
             joint_cam = params["joint_cam"].cuda()
             joint_cam_normalized = params["joint_cam_normalized"].cuda()
             joint_img_orig = params["joint_img_orig"][0].numpy()
+            #===================================================================
+            # tester.model.train()  
+            # for i in range(50):
+            #     with torch.no_grad():
+            #         _ = tester.model(img_patch)
+            # tester.model.eval()   
+            #===================================================================
             heatmap_out = tester.model(img_patch)
             if cfg.num_gpus > 1:
                 heatmap_out = gather(heatmap_out,0)
