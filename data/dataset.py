@@ -66,7 +66,7 @@ class DatasetLoader(Dataset):
         
     def __getitem__(self, index):
         if self.is_train and cfg.custom_batch_selection:
-            if random.random() <= 0.5:
+            if random.random() < cfg.labelled_selection_prob:
                 index = np.random.randint(cfg.labelled_data_range*len(cfg.Freihand_labelled_versions))
             else:
                 index = np.random.randint(cfg.labelled_data_range*len(cfg.Freihand_labelled_versions), cfg.training_size+1)

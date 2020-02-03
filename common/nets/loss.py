@@ -162,7 +162,7 @@ class CombinedLoss(nn.Module):
         with torch.no_grad():
             student_mpjpe = computeMPJPE(coord_out, gt_coord)
             teacher_mpjpe = computeMPJPE(coord_out_teacher, gt_coord)
-                
+        print(num_unsupervised_samples, num_supervised_samples)
         if(num_unsupervised_samples > 0):
             input_to_panet = coord_out[~labelled].reshape((coord_out[~labelled].shape[0], FreiHandConfig.num_joints, 3))
             input_to_panet = augment.prepare_panet_input(input_to_panet, tprime[~labelled], trans[~labelled], bbox[~labelled], 
@@ -193,13 +193,13 @@ class CombinedLoss(nn.Module):
             # sys.exit()            
             #===================================================================      
             Lteacher = (torch.abs(coord_out[~labelled] - coord_out_teacher[~labelled])) * gt_vis[~labelled]
-            #LPanet = (cfg._lambda * torch.abs(coord_out_reshaped[~labelled] - panet_output)) * gt_vis[~labelled]
+            LPanet = (cfg._lambda * torch.abs(coord_out_reshaped[~labelled] - panet_output)) * gt_vis[~labelled]
             #loss_unsupervised = (torch.abs(coord_out[~labelled] - coord_out_teacher[~labelled]) + 
             #                     cfg._lambda * torch.abs(coord_out_reshaped[~labelled] - panet_output)) * gt_vis[~labelled]
-            #loss_unsupervised = LPanet + Lteacher
+            loss_unsupervised = LPanet + Lteacher
             if self.size_average:
-                #LPanet = LPanet.sum() / num_unsupervised_samples
-                LPanet = 0
+                LPanet = LPanet.sum() / num_unsupervised_samples
+                #LPanet = 0
                 Lteacher = Lteacher.sum() / num_unsupervised_samples
                 #print(LPanet)
                 #print(Lteacher)
