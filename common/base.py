@@ -18,6 +18,7 @@ from model import get_pose_net
 import config_panet as config_panet
 import PANet_reconstruction
 import copy
+from pycrayon import CrayonClient
 #for p in sys.path:
 #    print(p)
 
@@ -41,7 +42,7 @@ class Base(object):
         self.tot_timer = Timer()
         self.gpu_timer = Timer()
         self.read_timer = Timer()
-
+        
         # logger
         self.logger = colorlogger(cfg.log_dir, log_name=log_name)
 
@@ -120,10 +121,10 @@ class Trainer(Base):
         model = DataParallelModel(model).cuda()
         optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
         model.load_state_dict(ckpt['network'])
-        optimizer.load_state_dict(ckpt['optimizer'])
-        scheduler.load_state_dict(ckpt['scheduler'])    
+#         optimizer.load_state_dict(ckpt['optimizer'])
+#         scheduler.load_state_dict(ckpt['scheduler'])    
         self.teacher_network = model
-        #self.teacher_network.eval()
+        self.teacher_network.eval()
         self.logger.info("Loaded teacher pose regressor")
         return copy.deepcopy(model)
        
@@ -159,16 +160,16 @@ class Trainer(Base):
             if cfg.loss == "L_combined":
                 self.load_nrsfm_tester()
                 self.load_regressor_teacher()
-                #assert not self.teacher_network.training
+                assert not self.teacher_network.training
         elif cfg.loss == "L_combined":
             self.load_nrsfm_tester()
             model = self.load_regressor_teacher()
-            #assert not self.teacher_network.training
+            assert not self.teacher_network.training
             start_epoch = 0
         else:
             start_epoch = 0
         model.train()
-        optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
+#         optimizer, scheduler = self.get_optimizer(self.cfg.optimizer, model)
         self.start_epoch = start_epoch
         self.model = model
         self.optimizer = optimizer

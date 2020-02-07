@@ -137,9 +137,9 @@ class CombinedLoss(nn.Module):
         student_mpjpe =  1
         teacher_mpjpe = 1
         #=======================================================================
-        # gt_norm = gt_coord.clone()
-        # gt_norm = gt_norm.reshape((gt_norm.shape[0], FreiHandConfig.num_joints, 3))
-        # gt_norm = augment.prepare_panet_input(gt_norm, tprime, trans, bbox, K, R, scale)
+        gt_norm = gt_coord.clone()
+        gt_norm = gt_norm.reshape((gt_norm.shape[0], FreiHandConfig.num_joints, 3))
+        gt_norm = augment.prepare_panet_input(gt_norm, tprime, trans, bbox, K, R, scale)
         #  
         # coord_out_tmp = coord_out.clone()
         # coord_out_tmp = coord_out_tmp.reshape((coord_out_tmp.shape[0], FreiHandConfig.num_joints, 3))
@@ -165,38 +165,59 @@ class CombinedLoss(nn.Module):
         print(num_unsupervised_samples, num_supervised_samples)
         if(num_unsupervised_samples > 0):
             input_to_panet = coord_out[~labelled].reshape((coord_out[~labelled].shape[0], FreiHandConfig.num_joints, 3))
+            # to do: remove rotation
+            
             input_to_panet = augment.prepare_panet_input(input_to_panet, tprime[~labelled], trans[~labelled], bbox[~labelled], 
                                                          K[~labelled], R[~labelled], scale[~labelled])
 
             panet_output, pts_recon_canonical, camera_matrix, code = nrsfm_tester.forward(input_to_panet)
+            #===================================================================
+            # print(input_to_panet)
+            # print(panet_output)
+            #print("=======================================================")
+            #===================================================================
             panet_output = panet_output.reshape(panet_output.shape[0], FreiHandConfig.num_joints * 3)
-            _assert_grad(panet_output)
-            coord_out_reshaped =  coord_out.reshape(coord_out.shape[0], FreiHandConfig.num_joints,  3)
-            coord_out_reshaped = coord_out_reshaped - coord_out_reshaped.mean(1, keepdims=True)
-            coord_out_reshaped = coord_out_reshaped.reshape(coord_out_reshaped.shape[0], FreiHandConfig.num_joints * 3)
-            
+            input_to_panet = input_to_panet.reshape(input_to_panet.shape[0], FreiHandConfig.num_joints * 3)
+            #input_to_panet = input_to_panet.reshape(input_to_panet.shape[0], FreiHandConfig.num_joints * 3)
+#            _assert_grad(panet_output)
+            #coord_out_reshaped =  coord_out.reshape(coord_out.shape[0], FreiHandConfig.num_joints,  3)
+            #coord_out_reshaped = coord_out_reshaped - coord_out_reshaped.mean(1, keepdims=True)
+            #coord_out_reshaped = coord_out_reshaped.reshape(coord_out_reshaped.shape[0], FreiHandConfig.num_joints * 3)
+
+            #===================================================================
+            # gt_norm = gt_coord.clone()
+            # gt_norm = gt_norm.reshape((gt_norm.shape[0], FreiHandConfig.num_joints, 3))
+            # gt_norm = augment.prepare_panet_input(gt_norm, tprime, trans, bbox, K, R, scale)
+            # 
+            # panet_output, pts_recon_canonical, camera_matrix, code = nrsfm_tester.forward(gt_norm)
+            # print(gt_norm)
+            # print(panet_output)
+            # 
+            # sys.exit()          
+            #===================================================================
             #===================================================================
             # print("gt_coord")
             # print(gt_norm)
             # print('input_to_panet')
             # print(input_to_panet)
-            # print(input_to_panet.shape)
-            # print("coord_out_reshaped")
-            # print(coord_out_reshaped)
-            # print(coord_out_reshaped.shape)
+            # # print(input_to_panet.shape)
+            # print("panet_output")
+            # print(panet_output)
+            # # print(coord_out_reshaped.shape)
             # print("computeMPJPE gt-input")
             # print(computeMPJPE(gt_norm, input_to_panet))
             # print("computeMPJPE gt-output")
             # print(computeMPJPE(gt_norm, panet_output))
             # print("computeMPJPE input-output")
             # print(computeMPJPE(input_to_panet, panet_output))
+            # print(labelled)
             # sys.exit()            
-            #===================================================================      
+            #===================================================================
             Lteacher = (torch.abs(coord_out[~labelled] - coord_out_teacher[~labelled])) * gt_vis[~labelled]
-            LPanet = (cfg._lambda * torch.abs(coord_out_reshaped[~labelled] - panet_output)) * gt_vis[~labelled]
+            LPanet = (cfg._lambda * torch.abs(input_to_panet - panet_output)) * gt_vis[~labelled]
             #loss_unsupervised = (torch.abs(coord_out[~labelled] - coord_out_teacher[~labelled]) + 
             #                     cfg._lambda * torch.abs(coord_out_reshaped[~labelled] - panet_output)) * gt_vis[~labelled]
-            loss_unsupervised = LPanet + Lteacher
+            #loss_unsupervised = LPanet + Lteacher
             if self.size_average:
                 LPanet = LPanet.sum() / num_unsupervised_samples
                 #LPanet = 0
@@ -212,9 +233,9 @@ class CombinedLoss(nn.Module):
             input_to_panet = gt_coord[labelled].reshape((gt_coord[labelled].shape[0], FreiHandConfig.num_joints, 3))
             input_to_panet = augment.prepare_panet_input(input_to_panet, tprime[labelled], trans[labelled], 
                                                          bbox[labelled], K[labelled], R[labelled], scale[labelled], p=False)
-            joint_cam_normalized = joint_cam_normalized[labelled]
-            joint_cam_normalized = joint_cam_normalized - joint_cam_normalized.mean(1, keepdims=True)          
-            assert torch.max(input_to_panet - joint_cam_normalized) < 10e-4     
+            #joint_cam_normalized = joint_cam_normalized[labelled]
+            #joint_cam_normalized = joint_cam_normalized - joint_cam_normalized.mean(1, keepdims=True)          
+            #assert torch.max(input_to_panet - joint_cam_normalized) < 10e-4     
             loss_supervised = torch.abs(coord_out[labelled] - gt_coord[labelled]) * gt_vis[labelled]
             if self.size_average:
                 loss_supervised = loss_supervised.sum() / num_supervised_samples

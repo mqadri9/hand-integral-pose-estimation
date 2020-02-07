@@ -554,9 +554,9 @@ def prepare_panet_input(input, tprime, trans, bbox, K, R, scale, p=False):
                                                         bbox[n_sample, 3], cfg.patch_width, cfg.patch_height, scale[n_sample], 
                                                         t, tprime[n_sample], p=False)
         transformed = pixel2cam_torch(transformed, K[n_sample], pp=p)
-        transformed = torch.transpose(torch.matmul(torch.transpose(R[n_sample], 0, 1), 
-                                                   torch.transpose(transformed, 0, 1)), 0, 1)
-        #transformed[:, 2] = transformed[:, 2] -  tprime[n_sample]
+        #transformed = torch.transpose(torch.matmul(torch.transpose(R[n_sample], 0, 1), 
+        #                                           torch.transpose(transformed, 0, 1)), 0, 1)
+        transformed[:, 2] = transformed[:, 2] -  tprime[n_sample]
         result.append(transformed)
     result = torch.stack(result).to(dtype=torch.float).cuda()
     result = result - result.mean(1, keepdims=True)

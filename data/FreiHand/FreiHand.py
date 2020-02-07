@@ -360,17 +360,21 @@ class FreiHand:
     
         if db != None:
             self.num_samples = len(db)
-            sorted(db, key = lambda i: i['labelled'])
+            db = sorted(db, key = lambda i: i['labelled'], reverse=True)
             n = 0 
             max_index = 0
             n_unlabelled = 0
+            min_lab = -1
             for i, e in enumerate(db):
                 if e["labelled"]:
+                    if min_lab == -1:
+                        min_lab = i
                     n+=1
                     max_index = i
                 else:
                     n_unlabelled +=1
-            print("There are {} labelled examples. Max unlabelled {} . Max labelled index is {}".format(n, n_unlabelled, max_index))
+            print(min_lab)
+            print("There are {} labelled examples. num unlabelled {} . Max labelled index is {}".format(n, n_unlabelled, max_index))
             return db
         data = []
         
@@ -434,7 +438,7 @@ class FreiHand:
             pk.dump(data, fid, pk.HIGHEST_PROTOCOL)
         print('{} samples read wrote {}'.format(len(data), cache_file))
         self.num_samples = len(data)
-        data = sorted(data, key = lambda i: i['labelled'])
+        db = sorted(db, key = lambda i: i['labelled'], reverse=True)
         n = 0 
         n_unlabelled = 0
         max_index = 0
@@ -444,7 +448,7 @@ class FreiHand:
                 max_index = i
             else:
                 n_unlabelled +=1
-        print("There are {} labelled examples. Max unlabelled {} . Max labelled index is {}".format(n, n_unlabelled, max_index))
+        print("There are {} labelled examples. num unlabelled {} . Max labelled index is {}".format(n, n_unlabelled, max_index))
         return data
     
     def gen_test_data(self, params_list):
