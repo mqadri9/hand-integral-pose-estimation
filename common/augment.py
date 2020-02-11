@@ -254,7 +254,7 @@ def sample_rotation_matrix():
     # Right now the only rotation is around the z axis from -30 deg tp 30 deg
     
     # TODO generate a small rotation matrix around an arbitrary vector and multiply them together
-    if random.random() <= 0:
+    if random.random() <= 0.6:
         return np.eye(3)
     theta = uniform(-0.52, 0.52)
     #theta = 0.52
