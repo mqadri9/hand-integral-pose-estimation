@@ -31,7 +31,13 @@ class DatasetLoader(Dataset):
             self.multiple_db = True
             # This will call Freihand.load_data()
             if not is_eval:
-                self.db = [d.load_data() for d in db]
+                if is_train: 
+                    if cfg.use_filtered_data:
+                        self.db = [d.load_filtered_data() for d in db]
+                    else:
+                        self.db = [d.load_data() for d in db]
+                else:
+                    self.db = [d.load_data() for d in db]
             else:
                 self.db = [d.load_evaluation_data() for d in db]
             #self.joints_name = [d.joints_name for d in db]
@@ -40,10 +46,18 @@ class DatasetLoader(Dataset):
             #self.lr_skeleton = [d.lr_skeleton for d in db]
             #self.flip_pairs = [d.flip_pairs for d in db]
             self.joints_have_depth = [d.joints_have_depth for d in db]
+            self.num_labelled = [d.num_labelled for d in db]
+            self.num_unlabelled = [d.num_unlabelled for d in db]
         else:
             self.multiple_db = False
             if not is_eval:
-                self.db = db.load_data()
+                if is_train:
+                    if cfg.use_filtered_data:
+                        self.db = db.load_filtered_data()
+                    else:
+                        self.db = db.load_data()
+                else:
+                    self.db = db.load_data()
             else:
                 self.db = db.load_evaluation_data()
             self.joint_num = db.joint_num
@@ -51,6 +65,8 @@ class DatasetLoader(Dataset):
             #self.lr_skeleton = db.lr_skeleton
             #self.flip_pairs = db.flip_pairs
             self.joints_have_depth = db.joints_have_depth
+            self.num_labelled = db.num_labelled
+            self.num_unlabelled = db.num_unlabelled
         self.main_loop = main_loop
         self.transform = transform
         self.is_train = is_train
@@ -62,26 +78,33 @@ class DatasetLoader(Dataset):
         self.is_eval = is_eval
         if is_eval or cfg.use_hand_detector:
             self.hand_detector = HandDetector(cfg.checksession, cfg.checkepoch, cfg.checkpoint, cuda=True, thresh=0.001)
-            self.hand_detector.load_faster_rcnn_detector() 
+            self.hand_detector.load_faster_rcnn_detector()
         
     def __getitem__(self, index):
-        if self.is_train and cfg.custom_batch_selection:
-            if random.random() < cfg.labelled_selection_prob:
-                index = np.random.randint(cfg.labelled_data_range*len(cfg.Freihand_labelled_versions))
-            else:
-                index = np.random.randint(cfg.labelled_data_range*len(cfg.Freihand_labelled_versions), cfg.training_size+1)
         if self.multiple_db:
             db_idx = index // max([len(db) for db in self.db])
             joint_num = self.joint_num[db_idx]
             skeleton = self.skeleton[db_idx]
             joints_have_depth = self.joints_have_depth[db_idx]
-            item_idx = index % max([len(db) for db in self.db]) % len(self.db[db_idx])
+            if self.is_train and cfg.custom_batch_selection:
+               if random.random() < cfg.labelled_selection_prob:
+                   item_idx = np.random.randint(self.num_labelled[db_idx])
+               else:
+                   item_idx = np.random.randint(self.num_labelled[db_idx], self.num_labelled[db_idx] + self.num_unlabelled[db_idx])       
+            else:
+                item_idx = index % max([len(db) for db in self.db]) % len(self.db[db_idx])
             data = copy.deepcopy(self.db[db_idx][item_idx])
         else:
             joint_num = self.joint_num
             skeleton = self.skeleton
             joints_have_depth = self.joints_have_depth
+            if self.is_train and cfg.custom_batch_selection:
+                if random.random() < cfg.labelled_selection_prob:
+                    index = np.random.randint(self.num_labelled)
+                else:
+                    index = np.random.randint(self.num_labelled, self.num_labelled + self.num_unlabelled)
             data = copy.deepcopy(self.db[index])
+            
         
         cvimg = cv2.imread(data['img_path'], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
         img_height, img_width, img_channels = cvimg.shape
@@ -90,8 +113,68 @@ class DatasetLoader(Dataset):
             #scale, rot, color_scale = 1.0, 0, [1.0, 1.0, 1.0]
         else:
             scale, R, color_scale = 1.0, np.eye(3), [1.0, 1.0, 1.0]
-        if not self.is_eval:
-            #if data["labelled"]:
+        
+        if self.is_train and cfg.use_filtered_data:
+            img_path = data["img_path"]
+            K = data["K"]
+            version = data["version"]
+            ref_bone_len = data["ref_bone_len"]
+            joint_cam_normalized = data["joint_cam_normalized"]
+            tprime = data["tprime"]
+            faster_rcnn_bbox = data["faster_rcnn_bbox"]
+            joint_cam = data["joint_cam"]
+            # generate pseudo label from the saved filtered output
+            img_patch, trans, joint_img, joint_vis, xyz_rot_scaled  = augment.generate_patch_image_from_normalized(cvimg, img_path, joint_cam_normalized, tprime, R, K, scale, inv=False,
+                                                                                                            hand_detector = self.hand_detector, faster_rcnn_bbox=faster_rcnn_bbox)
+            
+
+            for n_jt in range(len(joint_img)):
+                joint_img[n_jt, 0:2] = augment.trans_point2d(joint_img[n_jt, 0:2], trans)
+            label_teacher, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)           
+            
+            # generate true label to compare if 3D grountruth exists. In the case of labelled data that we are treating as unlabelled, 
+            # the generated label is only used as a way to generate predictions accuracy metrics from the unlabelled samples
+            # in case the sample as marked as Labelled, the label is used to calculate the supervised loss               
+            if cfg.use_hand_detector:
+                if faster_rcnn_bbox is None:
+                    print("(Warning) use_hand_detector is set to True but faster_rcnn_bbox is None")
+                _, _, joint_img, _, joint_cam_normalized, joint_vis, xyz_rot, _, tprime = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False, 
+                                                                                                                              hand_detector=self.hand_detector, 
+                                                                                                                              img_path=data['img_path'],
+                                                                                                                              faster_rcnn_bbox=faster_rcnn_bbox)
+            else:
+                _, _, joint_img, _, joint_cam_normalized, joint_vis, xyz_rot, _, tprime = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False)   
+            
+            for n_jt in range(len(joint_img)):
+                joint_img[n_jt, 0:2] = augment.trans_point2d(joint_img[n_jt, 0:2], trans)
+            label, _ = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis) 
+            
+            img_patch = self.transform(img_patch)
+            for n_c in range(img_channels):
+                img_patch[n_c, :, :] = np.clip(img_patch[n_c, :, :] * color_scale[n_c], 0, 255)
+
+            params = {
+                "R": R,
+                "K": K,
+                "joint_cam": joint_cam,
+                "scale": scale,
+                "img_path": data['img_path'],
+                "tprime": data["tprime"],
+                "tprime_torch": torch.from_numpy(np.array([data["tprime"]])),
+                "bbox": np.array(faster_rcnn_bbox),
+                "trans": trans,
+                "joint_cam_normalized": data["joint_cam_normalized"],
+                "joint_img_orig": np.zeros(data["joint_cam_normalized"].shape),
+                "ref_bone_len": data["ref_bone_len"],
+                "labelled": data["labelled"],
+                "label": label,
+                "label_weight": label_weight,
+                "label_teacher": label_teacher
+            }
+                      
+            return img_patch, params
+        
+        elif not self.is_eval:
             K = data['K']
             joint_cam = data["joint_cam"]
             faster_rcnn_bbox = data['faster_rccn_bbox']
@@ -115,7 +198,6 @@ class DatasetLoader(Dataset):
             else:
                 img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime = augment.generate_patch_image(cvimg, joint_cam, scale, R, K, inv=False)
             # 4. generate patch joint ground truth
-    
             for n_jt in range(len(joint_img)):
                 joint_img[n_jt, 0:2] = augment.trans_point2d(joint_img[n_jt, 0:2], trans)
             
@@ -134,9 +216,10 @@ class DatasetLoader(Dataset):
                 "ref_bone_len": data["ref_bone_len"],
                 "labelled": data["labelled"]
             }
-            label, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)              
+            label, label_weight = augment.generate_joint_location_label(cfg.patch_width, cfg.patch_height, joint_img, joint_vis)            
             params["label"] = label
             params["label_weight"] = label_weight
+            params["label_teacher"] = np.zeros(label.shape) 
             #===================================================================
             # else:
             #     img_patch, params = augment.generate_input_unlabelled(cvimg, R, scale, data)
@@ -151,6 +234,7 @@ class DatasetLoader(Dataset):
             #===================================================================
            
             img_patch = self.transform(img_patch)
+
             for n_c in range(img_channels):
                 img_patch[n_c, :, :] = np.clip(img_patch[n_c, :, :] * color_scale[n_c], 0, 255)
             return img_patch, params

@@ -340,6 +340,35 @@ class FreiHand:
         print('{} samples read'.format(len(data)))
         return data
 
+    def load_filtered_data(self):
+        cache_file = '{}_keypoint_bbox_db_{}_filtered.pkl'.format(self.name, self.data_split)
+        cache_file = os.path.join(self.data_dir, self.data_split, cache_file)
+        db = None
+        if os.path.exists(cache_file):
+            with open(cache_file, 'rb') as fid:
+                db = pk.load(fid)
+            print('{} gt db loaded from {}, {} samples are loaded'.format(self.name, cache_file, len(db)))
+        else:
+            print("Filtered data was not found in {}. Set use_filtered_data to False to generate data from scratch".format(cache_file))
+            sys.exit(1)
+        self.num_samples = len(db)
+        db = sorted(db, key = lambda i: i['labelled'], reverse=True)
+        n_labelled = 0 
+        max_index = 0
+        n_unlabelled = 0
+        min_lab = -1
+        for i, e in enumerate(db):
+            if e["labelled"]:
+                if min_lab == -1:
+                    min_lab = i
+                n_labelled+=1
+                max_index = i
+            else:
+                n_unlabelled +=1
+        print("There are {} labelled examples. num unlabelled {} . Max labelled index is {}".format(n_labelled, n_unlabelled, max_index))
+        self.num_labelled = n_labelled
+        self.num_unlabelled = n_unlabelled
+        return db        
    
     def load_data(self):
         # Need to see if we should train on all versions in the datasplit
@@ -361,7 +390,7 @@ class FreiHand:
         if db != None:
             self.num_samples = len(db)
             db = sorted(db, key = lambda i: i['labelled'], reverse=True)
-            n = 0 
+            n_labelled = 0 
             max_index = 0
             n_unlabelled = 0
             min_lab = -1
@@ -369,12 +398,14 @@ class FreiHand:
                 if e["labelled"]:
                     if min_lab == -1:
                         min_lab = i
-                    n+=1
+                    n_labelled+=1
                     max_index = i
                 else:
                     n_unlabelled +=1
             print(min_lab)
-            print("There are {} labelled examples. num unlabelled {} . Max labelled index is {}".format(n, n_unlabelled, max_index))
+            print("There are {} labelled examples. num unlabelled {} . Max labelled index is {}".format(n_labelled, n_unlabelled, max_index))
+            self.num_labelled = n_labelled
+            self.num_unlabelled = n_unlabelled
             return db
         data = []
         
@@ -438,17 +469,19 @@ class FreiHand:
             pk.dump(data, fid, pk.HIGHEST_PROTOCOL)
         print('{} samples read wrote {}'.format(len(data), cache_file))
         self.num_samples = len(data)
-        db = sorted(db, key = lambda i: i['labelled'], reverse=True)
-        n = 0 
+        data = sorted(data, key = lambda i: i['labelled'], reverse=True)
+        n_labelled = 0 
         n_unlabelled = 0
         max_index = 0
         for i, e in enumerate(data):
             if e["labelled"]:
-                n+=1
+                n_labelled+=1
                 max_index = i
             else:
                 n_unlabelled +=1
-        print("There are {} labelled examples. num unlabelled {} . Max labelled index is {}".format(n, n_unlabelled, max_index))
+        print("There are {} labelled examples. num unlabelled {} . Max labelled index is {}".format(n_labelled, n_unlabelled, max_index))
+        self.num_labelled = n_labelled
+        self.num_unlabelled = n_unlabelled
         return data
     
     def gen_test_data(self, params_list):

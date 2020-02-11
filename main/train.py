@@ -79,21 +79,28 @@ def main():
                 hm_width = cfg.output_shape[0]
                 hm_height = cfg.output_shape[0]
                 hm_depth = cfg.depth_dim
-                with torch.no_grad():
-                    heatmap_teacher_out = trainer.teacher_network(img_patch)
-                coord_out_teacher = []
-                if cfg.num_gpus > 1:
-                    for i in range(len(heatmap_teacher_out)):
-                        coord_out_teacher.append(softmax_integral_tensor(heatmap_teacher_out[i], FreiHandConfig.num_joints, 
-                                                                         hm_width, hm_height, hm_depth))
+                
+                if cfg.use_filtered_data:
+                    coord_out_teacher = params["label_teacher"].cuda()
+                    coord_out_teacher = coord_out_teacher.unsqueeze(0)
                 else:
-                        coord_out_teacher.append(softmax_integral_tensor(heatmap_teacher_out, FreiHandConfig.num_joints,
-                                                                        hm_width, hm_height, hm_depth))                 
-                del heatmap_teacher_out
-                coord_out_teacher = torch.stack(coord_out_teacher, dim=0)
+                    with torch.no_grad():
+                        heatmap_teacher_out = trainer.teacher_network(img_patch)
+                    coord_out_teacher = []
+                    if cfg.num_gpus > 1:
+                        for i in range(len(heatmap_teacher_out)):
+                            coord_out_teacher.append(softmax_integral_tensor(heatmap_teacher_out[i], FreiHandConfig.num_joints, 
+                                                                             hm_width, hm_height, hm_depth))
+                    else:
+                            coord_out_teacher.append(softmax_integral_tensor(heatmap_teacher_out, FreiHandConfig.num_joints,
+                                                                            hm_width, hm_height, hm_depth))                 
+                    del heatmap_teacher_out
+                    
+                    coord_out_teacher = torch.stack(coord_out_teacher, dim=0)
+                
                 combinedLoss, student_mpjpe, teacher_mpjpe, loss_supervised, loss_unsupervised = trainer.CombinedLoss(heatmap_out, coord_out_teacher, label, label_weight, labelled, 
-                                                                                                                              tprime, trans, bbox, K, R, scale, joint_cam_normalized,
-                                                                                                                              trainer.nrsfm_tester)
+                                                                                                                      tprime, trans, bbox, K, R, scale, joint_cam_normalized,
+                                                                                                                      trainer.nrsfm_tester)
                 loss = combinedLoss
             else:
                 JointLocationLoss = trainer.JointLocationLoss(heatmap_out, label, label_weight)

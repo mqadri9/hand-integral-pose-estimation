@@ -90,7 +90,6 @@ class Trainer(Base):
     def __init__(self, cfg):
         if cfg.loss == "L_combined":
             self.CombinedLoss = DataParallelCriterion(loss.CombinedLoss())
-            self.ParallelSoftmaxIntegralTensor = DataParallelCriterion(loss.ParallelSoftmaxIntegralTensor())
         else: 
             self.JointLocationLoss = DataParallelCriterion(loss.JointLocationLoss())
             self.JointLocationLoss2 = DataParallelCriterion(loss.JointLocationLoss2())        
@@ -163,7 +162,7 @@ class Trainer(Base):
                 assert not self.teacher_network.training
         elif cfg.loss == "L_combined":
             self.load_nrsfm_tester()
-            model = self.load_regressor_teacher()
+            _model = self.load_regressor_teacher()
             assert not self.teacher_network.training
             start_epoch = 0
         else:

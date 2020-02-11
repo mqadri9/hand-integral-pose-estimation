@@ -254,7 +254,7 @@ def sample_rotation_matrix():
     # Right now the only rotation is around the z axis from -30 deg tp 30 deg
     
     # TODO generate a small rotation matrix around an arbitrary vector and multiply them together
-    if random.random() <= 0.6:
+    if random.random() <= 0:
         return np.eye(3)
     theta = uniform(-0.52, 0.52)
     #theta = 0.52
@@ -368,14 +368,9 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
     joint_img_orig[:,2] = np.squeeze(z_orig - z_orig[FreiHandConfig.root_idx])
     
     homo = K.dot(R).dot(np.linalg.inv(K))
-    #dst_w, dst_h = find_perspective_bounds(homo, cvimg)
     img2_w = cv2.warpPerspective(cvimg, homo, (cvimg.shape[1], cvimg.shape[0]))
-    #img2_w = cv2.warpPerspective(cvimg, homo, (int(dst_h), int(dst_w)))
 
     joint_vis = np.ones(joint_cam.shape, dtype=np.float)
-    #vis = np.ones(joint_cam.shape)
-    #joint_vis = vis[:, 0] > 0
-    #joint_vis = np.expand_dims(joint_vis, axis=1)
     uv, z, xyz_rot = projectPoints(joint_cam, R, K)
 
     if cfg.use_hand_detector and return_bbox:
@@ -401,20 +396,9 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
     # joint_cam_normalized is the  new 3D groundthruth
     uv_scaled, z_scaled, xyz_rot_scaled = projectPoints(joint_cam_normalized, R, K)
     joint_img = np.zeros((FreiHandConfig.num_joints, 3))
-    #print(joint_cam_normalized)
     joint_img[:,0] = uv_scaled[:,0]
     joint_img[:,1] = uv_scaled[:,1]
     # Root centered
-    #joint_img[:,2] = np.squeeze(z_scaled - z_scaled[FreiHandConfig.root_idx])
-    # vv = joint_cam_normalized.copy()
-
-    #===========================================================================
-    # vv[:,2] = np.squeeze(vv[:,2] - tprime)
-    # print(vv)
-    # print(tprime)
-    #===========================================================================
-    #print("joint_cam_normalized")
-    #joint_img[:,2] = z_scaled
     joint_img[:,2] = np.squeeze(z_scaled - tprime)
 
     bb_c_x = float(bbox[0])
@@ -423,17 +407,44 @@ def generate_patch_image(cvimg, joint_cam, scale, R, K, aspect_ratio=1.0, inv=Fa
     bb_height = float(bbox[3])
     trans = gen_trans_from_patch_cv(bb_c_x, bb_c_y, bb_width, bb_height, cfg.input_shape[1], cfg.input_shape[0], scale, inv=inv)
     img_patch = cv2.warpPerspective(img2_w, trans, (int(cfg.input_shape[1]), int(cfg.input_shape[0])), flags=cv2.INTER_LINEAR)
-    #print("img path before transformation")
-    #nn = str(random.randint(0,1000))
-    #print(nn)
     # Swap first and last columns # BGR to RGB
     img_patch = img_patch[:,:,::-1].copy()
     img_patch = img_patch.astype(np.float32)
-    #print("img patch after transformation")
-    #print(img_patch.shape)
-    #cv2.imwrite('/home/mqadri/hand-integral-pose-estimation/tests/{}.jpg'.format(nn), cv2.cvtColor(img_patch, cv2.COLOR_RGB2BGR))
-    return img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime 
+    return img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime
 
+def generate_patch_image_from_normalized(cvimg, img_path, joint_cam_normalized, tprime, R, K, scale, inv=False, hand_detector=None, return_bbox=True, faster_rcnn_bbox=None):
+    img = cvimg.copy()
+    img_height, img_width, img_channels = img.shape    
+
+    homo = K.dot(R).dot(np.linalg.inv(K))
+    img2_w = cv2.warpPerspective(cvimg, homo, (cvimg.shape[1], cvimg.shape[0]))
+    joint_vis = np.ones(joint_cam_normalized.shape, dtype=np.float)
+       
+    uv_scaled, z_scaled, xyz_rot_scaled = projectPoints(joint_cam_normalized, R, K)
+    joint_img = np.zeros((FreiHandConfig.num_joints, 3))
+    joint_img[:,0] = uv_scaled[:,0]
+    joint_img[:,1] = uv_scaled[:,1]
+    joint_img[:,2] = np.squeeze(z_scaled - tprime)   
+
+    if cfg.use_hand_detector and return_bbox:
+        if cfg.online_hand_detection:
+            bbox = find_bb_hand_detector(img_path, hand_detector, aspect_ratio=1.0)
+        else:
+            bbox = faster_rcnn_bbox
+    else:
+        bbox = find_bb(uv_scaled, joint_vis)
+
+    bb_c_x = float(bbox[0])
+    bb_c_y = float(bbox[1])
+    bb_width = float(bbox[2])
+    bb_height = float(bbox[3])
+    trans = gen_trans_from_patch_cv(bb_c_x, bb_c_y, bb_width, bb_height, cfg.input_shape[1], cfg.input_shape[0], scale, inv=inv)
+    img_patch = cv2.warpPerspective(img2_w, trans, (int(cfg.input_shape[1]), int(cfg.input_shape[0])), flags=cv2.INTER_LINEAR)
+    # Swap first and last columns # BGR to RGB
+    img_patch = img_patch[:,:,::-1].copy()
+    img_patch = img_patch.astype(np.float32)
+    return img_patch, trans, joint_img, joint_vis, xyz_rot_scaled 
+  
 def rotate_2d(pt_2d, rot_rad):
     x = pt_2d[0]
     y = pt_2d[1]
