@@ -31,13 +31,13 @@ class Config:
     #end_epoch = 20
     end_epoch = 400
     #lr = 1e-3 
-    lr = 1e-3
+    lr = 1e-4
     #lr_dec_factor = 0.5
     lr_dec_factor = 0.1
     optimizer = 'adam'
     weight_decay = 1e-5
     batch_size = 32
-    test_batch_size = 32
+    test_batch_size = 16
     eval_batch_size = 32
     eval_version = 2
     ## model setting
@@ -46,18 +46,27 @@ class Config:
     patch_height = 224
     pad_factor = 1.75
     
-    loss = "L1"
-    _lambda = 1
+    loss = "L_combined"
+    _lambda = 0
     labelled_data_range = 3255 + 1
-    training_size = 3255
+    training_size = 26050
     testing_size = 3255
-    custom_batch_selection = False
+    
+    # When generating the label/unlabelled splits. Specify if any or all versions need to be marked as labelled
+    Freihand_labelled_versions = ['gs', 'hom', 'sample', 'auto']
+    # If set to true generate a x % labelled and y % unlabelled example splits
+    custom_batch_selection = True
+    # The probability of selecting a labelled examples for each _get_item_ call
+    labelled_selection_prob = 0.5
+    # Load a precomputed dictionary of teacher labels that satisfied some confidence measure
+    use_filtered_data = True
+    
     # TODO move the pixel_mean and pixel_std to the Freihand specific config file: FreiHand_config.py?
     pixel_mean = (0.4559, 0.5142, 0.5148)
     pixel_std = (1, 1, 1) #(0.2736, 0.2474, 0.2523)
     scaling_constant = 100
     
-    num_thread = 4
+    num_thread = 0
     use_hand_detector = True
     online_hand_detection = False
     checksession = 1

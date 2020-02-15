@@ -135,6 +135,271 @@ def computeMPJPE(pred, gt):
     gt = gt.reshape((gt.shape[0], FreiHandConfig.num_joints, 3))
     return (pred - gt).norm(dim=2).mean(-1).mean()
 
+def computeMPJPE_per_joint(pred, gt):
+    pred = pred.reshape((pred.shape[0], FreiHandConfig.num_joints, 3))
+    gt = gt.reshape((gt.shape[0], FreiHandConfig.num_joints, 3))
+    #print((pred - gt).norm(dim=2).shape)
+    return (pred - gt).norm(dim=2)
+
+
+def _plot(joint_0_mpjpe, var_threshold, joint_0_var, index, thr_m):
+    joint_0_mpjpe = np.array(joint_0_mpjpe)
+    joint_0_var = np.array(joint_0_var)
+    fig,ax = plt.subplots()
+    ax.scatter(joint_0_var, joint_0_mpjpe, s = 0.4)
+    ax.set_xlabel('variance')
+    ax.set_ylabel('mpjpe')
+    ax.set_xlim((0, 1e-4))
+    fig.savefig('joint_{}_var_mpjpe.png'.format(index), dpi=fig.dpi)
+    plt.close(fig)
+    values = [] 
+    values_less_than_threshold = []
+    for th in var_threshold:  
+        tmp = 0
+        tmp2 = 0
+        for i in range(len(joint_0_var)):
+            if joint_0_var[i] < th:
+                tmp2 +=1
+            if joint_0_var[i] < th and joint_0_mpjpe[i] < thr_m:
+                tmp+=1
+        values.append(100.0*tmp/len(joint_0_var))
+        values_less_than_threshold.append(100.0*tmp2/len(joint_0_var))
+    values = np.array(values)
+    values_less_than_threshold = np.array(values_less_than_threshold)
+    ratio = 100*values/values_less_than_threshold
+    fig,ax = plt.subplots()
+    ax.scatter(var_threshold, values, s = 0.4)
+    ax.set_xlabel('thresholds')
+    ax.set_ylabel('num of samples < 0.005')
+    ax.set_xlim((0, 1e-4))
+    #fig.savefig('joint_{}_precision_{}.png'.format(index, thr_m), dpi=fig.dpi)
+    plt.close(fig)    
+    fig,ax = plt.subplots()
+    ax.scatter(var_threshold, values_less_than_threshold, s = 0.4)
+    ax.set_xlabel('thresholds')
+    ax.set_ylabel('num of samples less than threshold')
+    ax.set_xlim((0, 1e-4))
+    #fig.savefig('joint_{}_precision_total_{}.png'.format(index, thr_m), dpi=fig.dpi)
+    plt.close(fig)   
+    fig,ax = plt.subplots()
+    ax.scatter(var_threshold, ratio, s = 0.4)
+    ax.set_xlabel('thresholds')
+    ax.set_ylabel('ratio of samples than threshold with mpjpe < 5mm')
+    ax.set_xlim((0, 1e-4))
+    #fig.savefig('ratio_joint_{}_precision_total_{}.png'.format(index, thr_m), dpi=fig.dpi)
+    plt.close(fig)
+    return ratio 
+    
+def get_variance_measure(cfg):
+    cudnn.fastest = True
+    cudnn.benchmark = True
+    cudnn.deterministic = False
+    cudnn.enabled = True
+    cur_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.join(cur_dir, '..', '..')
+    common_dir = os.path.join(root_dir, 'common')
+    main_dir = os.path.join(root_dir, 'main')
+    util_dir = os.path.join(root_dir, 'common', 'utils')
+    sys.path.insert(0, os.path.join(common_dir))
+    sys.path.insert(0, os.path.join(main_dir))
+    sys.path.insert(0, os.path.join(util_dir))
+    cfg.batch_size = 1
+    cfg.custom_batch_selection = False
+    
+    data_dir = os.path.join('..', 'data', 'FreiHand')
+    name = "FreiHand"
+    data_split= "testing"
+    #cache_file = '{}_keypoint_bbox_db_{}_filtered.pkl'.format(name, data_split)
+    #cache_file = os.path.join(data_dir, data_split, cache_file)
+    trainer = Trainer(cfg)
+    trainer._make_batch_generator()
+    trainer._make_model()
+    freihand = FreiHand(data_split="testing")
+    data = freihand.load_data()
+    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=cfg.pixel_mean, std=cfg.pixel_std)])
+    i = 0
+    joint_0_mpjpe = []
+    joint_0_var = []
+    
+    joint_4_mpjpe = []
+    joint_4_var = []
+    
+    joint_8_mpjpe = []
+    joint_8_var = []
+    
+    joint_12_mpjpe = []
+    joint_12_var = []
+    
+    joint_16_mpjpe = []
+    joint_16_var = []
+    
+    joint_20_mpjpe = []
+    joint_20_var = []
+    var = [] 
+    mpjpe = []
+    for d in data:
+        #if i % 1000 == 0:
+        print("samples processed {}".format(i))
+        if i > 1000:
+            break
+        K = d['K']
+        joint_cam = d["joint_cam"]
+        faster_rcnn_bbox = d['faster_rccn_bbox']
+        img_path = d["img_path"]
+        element = {
+            "img_path": img_path,
+            'K': K,
+            'version': d['version'],
+            "idx": d['idx'],
+            "ref_bone_len": d['ref_bone_len'],
+            "faster_rcnn_bbox": faster_rcnn_bbox,
+            "joint_cam": joint_cam
+        }
+        cvimg = cv2.imread(d['img_path'], cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+        img_height, img_width, img_channels = cvimg.shape 
+        r = np.arange(-0.52, 0.53, 0.05)
+        stacked_predictions = np.zeros((21, 3, len(r)))
+        j = 0
+        for theta in r:
+            scale, R, color_scale = get_aug_config(theta=theta)
+            img_patch, trans, joint_img, joint_img_orig, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime = crop_and_get_patch(cvimg, joint_cam, K, R, scale, hand_detector=None, img_path = img_path,
+                                                                                                                                    faster_rcnn_bbox = faster_rcnn_bbox)
+            img_patch = transform(img_patch)
+            for n_c in range(img_channels):
+                img_patch[n_c, :, :] = np.clip(img_patch[n_c, :, :] * color_scale[n_c], 0, 255)
+            
+            img_patch = img_patch.cuda()
+            img_patch = torch.unsqueeze(img_patch, 0)
+            heatmap_out = trainer.teacher_network(img_patch)
+            joint_num = 21
+            hm_width = heatmap_out.shape[-1]
+            hm_height = heatmap_out.shape[-2]
+            hm_depth = heatmap_out.shape[-3] // FreiHandConfig.num_joints
+            coord_in_patch = augment.get_joint_location_result(cfg.patch_width, cfg.patch_height, heatmap_out)
+            coord_in_patch = np.squeeze(coord_in_patch)
+            pre_3d_kpt = convert_to_cam_coord(coord_in_patch, bbox, scale, trans, tprime, K, R)
+            stacked_predictions[:,:,j] = pre_3d_kpt
+            j+=1
+        stacked_predictions = np.array(stacked_predictions)
+        variances = np.var(stacked_predictions, axis=2)
+        variances_joint = np.sum(variances, axis=1)
+        total_variance = np.sum(variances)
+        average_predictions = np.mean(stacked_predictions, axis=2)
+        average_predictions = np.expand_dims(average_predictions, 0)
+        joint_cam_normalized = np.expand_dims(joint_cam_normalized, 0)
+        mp = torch.squeeze(computeMPJPE_per_joint(torch.from_numpy(joint_cam_normalized), torch.from_numpy(average_predictions)))
+        total_mpjpe = computeMPJPE(torch.from_numpy(joint_cam_normalized), torch.from_numpy(average_predictions))
+        joint_0_mpjpe.append(mp[0])
+        joint_0_var.append(variances_joint[0])
+
+        joint_4_mpjpe.append(mp[4])
+        joint_4_var.append(variances_joint[4])
+        
+        joint_12_mpjpe.append(mp[12])
+        joint_12_var.append(variances_joint[12])
+        
+        joint_20_mpjpe.append(mp[20])
+        joint_20_var.append(variances_joint[20])
+        
+        var.append(total_variance)
+        mpjpe.append(total_mpjpe)
+        i+=1
+    
+    
+    print("=======================")
+    print(len(joint_0_var))
+    var_threshold_2= np.arange(0, 1e-3, 1e-5)
+    ratio_5 = _plot(mpjpe, var_threshold_2, var, 0, 0.005)
+    ratio_7 = _plot(mpjpe, var_threshold_2, var, 0, 0.007)
+    ratio_10 = _plot(mpjpe, var_threshold_2, var, 0, 0.010)
+    fig,ax = plt.subplots()
+    p1 = ax.scatter(var_threshold_2, ratio_5, s = 0.4)
+    p2 = ax.scatter(var_threshold_2, ratio_7, s = 0.4)
+    p3 = ax.scatter(var_threshold_2, ratio_10, s = 0.4)
+    ax.set_xlabel('variance thresholds')
+    ax.set_ylabel('ratio of samples than threshold with mpjpe < x mm')
+    ax.set_xlim((0, 1e-3))
+    plt.legend((p1, p2, p3),
+               ('< 5mm', '< 7mm', '< 10 mm'),
+               scatterpoints=1,
+               loc='upper right',
+               ncol=3,
+               fontsize=12)
+    fig.savefig('ratio_sum_var_precision.png', dpi=fig.dpi)
+    plt.close(fig)
+
+    
+    var_threshold= np.arange(0, 1e-4, 5e-7)
+    
+    ratio_0_5 = _plot(joint_0_mpjpe, var_threshold, joint_0_var, 0, 0.005)
+    ratio_4_5 = _plot(joint_4_mpjpe, var_threshold,joint_4_var, 4, 0.005)
+    ratio_12_5 = _plot(joint_12_mpjpe, var_threshold,joint_12_var, 12, 0.005)
+    ratio_20_5 = _plot(joint_20_mpjpe, var_threshold,joint_20_var, 20, 0.005)
+
+    ratio_0_7 = _plot(joint_0_mpjpe, var_threshold,joint_0_var, 0, 0.007)
+    ratio_4_7 =_plot(joint_4_mpjpe, var_threshold,joint_4_var, 4, 0.007)
+    ratio_12_7 =_plot(joint_12_mpjpe, var_threshold,joint_12_var, 12, 0.007)
+    ratio_20_7 =_plot(joint_20_mpjpe, var_threshold,joint_20_var, 20, 0.007)          
+    
+    ratio_0_10 =_plot(joint_0_mpjpe, var_threshold, joint_0_var, 0, 0.010)
+    ratio_4_10 =_plot(joint_4_mpjpe, var_threshold, joint_4_var, 4, 0.010)
+    ratio_12_10 =_plot(joint_12_mpjpe, var_threshold, joint_12_var, 12, 0.010)
+    ratio_20_10 =_plot(joint_20_mpjpe, var_threshold, joint_20_var, 20, 0.010)
+    
+    fig,ax = plt.subplots()
+    p1 = ax.scatter(var_threshold, ratio_0_5, s = 0.4)
+    p2 = ax.scatter(var_threshold, ratio_4_5, s = 0.4)
+    p3 = ax.scatter(var_threshold, ratio_12_5, s = 0.4)
+    p4 = ax.scatter(var_threshold, ratio_20_5, s = 0.4)
+    ax.set_xlabel('variance thresholds')
+    ax.set_ylabel('ratio of samples than threshold with mpjpe < 5mm')
+    ax.set_xlim((0, 1e-4))
+    plt.legend((p1, p2, p3, p4),
+               ('joint 1', 'joint 4', 'joint 7', 'joint 20'),
+               scatterpoints=1,
+               loc='upper right',
+               ncol=3,
+               fontsize=12)
+    fig.savefig('ratio_joint_precision_combined_{}.png'.format(5), dpi=fig.dpi)
+    plt.close(fig)
+    
+    fig,ax = plt.subplots()
+    p1 =ax.scatter(var_threshold, ratio_0_7, s = 0.4)
+    p2 =ax.scatter(var_threshold, ratio_4_7, s = 0.4)
+    p3 =ax.scatter(var_threshold, ratio_12_7, s = 0.4)
+    p4 =ax.scatter(var_threshold, ratio_20_7, s = 0.4)
+    ax.set_xlabel('variance thresholds')
+    ax.set_ylabel('ratio of samples than threshold with mpjpe < 7mm')
+    ax.set_xlim((0, 1e-4))
+    plt.legend((p1, p2, p3, p4),
+               ('joint 1', 'joint 4', 'joint 7', 'joint 20'),
+               scatterpoints=1,
+               loc='upper right',
+               ncol=3,
+               fontsize=12)
+    fig.savefig('ratio_joint_precision_combined_{}.png'.format(7), dpi=fig.dpi)
+    plt.close(fig)
+    
+    fig,ax = plt.subplots()
+    p1 = ax.scatter(var_threshold, ratio_0_10, s = 0.4)
+    p2 = ax.scatter(var_threshold, ratio_4_10, s = 0.4)
+    p3 = ax.scatter(var_threshold, ratio_12_10, s = 0.4)
+    p4 = ax.scatter(var_threshold, ratio_20_10, s = 0.4)
+    ax.set_xlabel('variance thresholds')
+    ax.set_ylabel('ratio of samples than threshold with mpjpe < 10mm')
+    ax.set_xlim((0, 1e-4))
+    plt.legend((p1, p2, p3, p4),
+               ('joint 1', 'joint 4', 'joint 7', 'joint 20'),
+               scatterpoints=1,
+               loc='upper right',
+               ncol=3,
+               fontsize=12)
+    fig.savefig('ratio_joint_precision_combined_{}.png'.format(10), dpi=fig.dpi)
+    plt.close(fig)
+
+    
+    sys.exit()
+
 def main():
     args = parse_args()
     cfg.set_args(args.gpu_ids)
@@ -154,7 +419,7 @@ def main():
     sys.path.insert(0, os.path.join(util_dir))
     cfg.batch_size = 1
     cfg.custom_batch_selection = False
-    
+    get_variance_measure(cfg)
     data_dir = os.path.join('..', 'data', 'FreiHand')
     name = "FreiHand"
     data_split= "training"
@@ -204,7 +469,7 @@ def main():
             j = 0
             for theta in r:
                 scale, R, color_scale = get_aug_config(theta=theta)
-                img_patch, trans, _, _, _, joint_vis, xyz_rot, bbox, tprime = crop_and_get_patch(cvimg, joint_cam, K, R, scale, hand_detector=None, img_path = img_path,
+                img_patch, trans, _, _, joint_cam_normalized, joint_vis, xyz_rot, bbox, tprime = crop_and_get_patch(cvimg, joint_cam, K, R, scale, hand_detector=None, img_path = img_path,
                                                                                                 faster_rcnn_bbox = faster_rcnn_bbox)
                 img_patch = transform(img_patch)
                 for n_c in range(img_channels):
@@ -233,6 +498,10 @@ def main():
             element['tprime_torch'] = torch.from_numpy(np.array([tprime]))
             element['labelled'] = False
             element['variance'] = m
+            average_predictions = np.expand_dims(average_predictions, 0)
+            joint_cam_normalized = np.expand_dims(joint_cam_normalized, 0)
+            mp = computeMPJPE(torch.from_numpy(joint_cam_normalized), torch.from_numpy(average_predictions))
+            print(m, mp)
         kept_data.append(element)
         i+=1
     with open(cache_file, 'wb') as fid:
@@ -256,9 +525,7 @@ if __name__ == "__main__":
 
 
 #print("============================================")
-#average_predictions = np.expand_dims(average_predictions, 0)
-#joint_cam_normalized = np.expand_dims(joint_cam_normalized, 0)
-#mp = computeMPJPE(torch.from_numpy(joint_cam_normalized), torch.from_numpy(average_predictions))
+
 #===================================================================
 # print("=======================================")
 # print(m)
